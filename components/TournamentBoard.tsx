@@ -246,18 +246,6 @@ function GroupPanel(props: {
         <h3>{title}</h3>
         <span>{subtitle}</span>
       </div>
-      <div>
-        {matches.map((m) => (
-          <MatchRow
-            key={m.id}
-            matchId={m.id}
-            p1={m.p1}
-            p2={m.p2}
-            sets={sets[m.id]}
-            onSetChange={onSetChange}
-          />
-        ))}
-      </div>
       <table className="standings">
         <thead>
           <tr>
@@ -286,6 +274,18 @@ function GroupPanel(props: {
         </tbody>
       </table>
       {!complete && <p className="provisional-note">Tabelle ist vorläufig, solange noch Spiele offen sind.</p>}
+      <div className="match-list">
+        {matches.map((m) => (
+          <MatchRow
+            key={m.id}
+            matchId={m.id}
+            p1={m.p1}
+            p2={m.p2}
+            sets={sets[m.id]}
+            onSetChange={onSetChange}
+          />
+        ))}
+      </div>
     </div>
   );
 }
