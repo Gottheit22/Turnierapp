@@ -1,0 +1,10 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Offen per Link, ohne Login: jede/r darf das Turnierdokument lesen und schreiben.
+    match /tournament/{docId} {
+      allow read, write: if true;
+    }
+  }
+}
