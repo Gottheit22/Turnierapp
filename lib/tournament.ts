@@ -117,9 +117,14 @@ export function groupStandings(matches: SimpleMatch[], sets: SetsMap, players: s
         if (!isNaN(av) && !isNaN(bv) && av !== bv) {
           if (idx === 2) {
             // Match-Tiebreak (3. Satz): zählt nur als 1:0 Spiele für die Siegerin,
-            // nicht die tatsächlichen Tiebreak-Punkte.
-            if (av > bv) stat[m.p1].gamesWon += 1;
-            else stat[m.p2].gamesWon += 1;
+            // 0:1 für die Verliererin – nicht die tatsächlichen Tiebreak-Punkte.
+            if (av > bv) {
+              stat[m.p1].gamesWon += 1;
+              stat[m.p2].gamesLost += 1;
+            } else {
+              stat[m.p2].gamesWon += 1;
+              stat[m.p1].gamesLost += 1;
+            }
           } else {
             stat[m.p1].gamesWon += av;
             stat[m.p1].gamesLost += bv;
