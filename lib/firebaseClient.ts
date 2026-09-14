@@ -1,5 +1,5 @@
 import { getApps, getApp, initializeApp } from 'firebase/app';
-import { doc, getFirestore } from 'firebase/firestore';
+import { collection, getFirestore, doc } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -11,7 +11,6 @@ const firebaseConfig = {
 };
 
 if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-  // Wird nur im Browser sichtbar; hilft beim schnellen Erkennen fehlender env vars.
   console.warn(
     'Firebase-Umgebungsvariablen fehlen. Bitte die NEXT_PUBLIC_FIREBASE_* Werte setzen.'
   );
@@ -20,5 +19,9 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 
-// Ein einziges Dokument hält den kompletten Turnierstand.
-export const stateDocRef = doc(db, 'tournament', 'default');
+export const TOURNAMENTS_COLLECTION = 'tournaments';
+export const tournamentsCollectionRef = collection(db, TOURNAMENTS_COLLECTION);
+
+export function tournamentDocRef(id: string) {
+  return doc(db, TOURNAMENTS_COLLECTION, id);
+}
