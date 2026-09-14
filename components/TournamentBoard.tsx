@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { addDoc, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
-import { tournamentDocRef, tournamentsCollectionRef } from '@/lib/firebaseClient';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
+import { auth, tournamentDocRef, tournamentsCollectionRef } from '@/lib/firebaseClient';
 import {
   GroupInfo,
   SetsMap,
@@ -39,8 +40,16 @@ export default function TournamentBoard() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [status, setStatus] = useState<Status>('loading');
   const [localSets, setLocalSets] = useState<SetsMap>({});
+  const [user, setUser] = useState<User | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextRemote = useRef(false);
+
+  // Admin-Login-Status verfolgen
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => setUser(u));
+    return () => unsub();
+  }, []);
 
   // Liste aller Turniere live laden
   useEffect(() => {
@@ -112,18 +121,6 @@ export default function TournamentBoard() {
     });
   };
 
-  const handleReset = async () => {
-    if (!selected) return;
-    if (!confirm(`Wirklich alle Ergebnisse von "${selected.name}" zurücksetzen?`)) return;
-    setLocalSets({});
-    skipNextRemote.current = true;
-    try {
-      await setDoc(tournamentDocRef(selected.id), { sets: {} }, { merge: true });
-    } catch (e) {
-      setStatus('error');
-    }
-  };
-
   const handleToggleArchive = async (t: TournamentDoc) => {
     try {
       await setDoc(tournamentDocRef(t.id), { status: t.status === 'archived' ? 'active' : 'archived' }, { merge: true });
@@ -186,35 +183,50 @@ export default function TournamentBoard() {
                 )}
               </select>
             )}
-            <button className="tool-btn" onClick={() => setShowCreateForm((v) => !v)} type="button">
-              + Neues Turnier
-            </button>
             {archivedTournaments.length > 0 && (
               <button className="tool-btn" onClick={() => setShowArchive((v) => !v)} type="button">
                 {showArchive ? 'Archiv ausblenden' : `Archiv anzeigen (${archivedTournaments.length})`}
               </button>
             )}
-            {selected && (
-              <button className="tool-btn" onClick={() => handleToggleArchive(selected)} type="button">
-                {selected.status === 'archived' ? 'Reaktivieren' : 'Archivieren'}
-              </button>
+
+            {user && (
+              <>
+                <button className="tool-btn" onClick={() => setShowCreateForm((v) => !v)} type="button">
+                  + Neues Turnier
+                </button>
+                {selected && (
+                  <button className="tool-btn" onClick={() => handleToggleArchive(selected)} type="button">
+                    {selected.status === 'archived' ? 'Reaktivieren' : 'Archivieren'}
+                  </button>
+                )}
+              </>
             )}
-            {selected && !readOnly && (
-              <button className="tool-btn" onClick={handleReset} type="button">
-                Ergebnisse zurücksetzen
-              </button>
-            )}
+
             <span className="save-status">
               {status === 'loading' && 'Lade …'}
               {status === 'saving' && 'Speichere …'}
               {status === 'saved' && 'Gespeichert ✓'}
               {status === 'error' && 'Verbindung fehlgeschlagen'}
             </span>
+
+            <span className="admin-area">
+              {user ? (
+                <button className="tool-btn tool-btn-ghost" onClick={() => signOut(auth)} type="button">
+                  Admin: {user.email} · Abmelden
+                </button>
+              ) : (
+                <button className="tool-btn tool-btn-ghost" onClick={() => setShowLogin((v) => !v)} type="button">
+                  Admin-Login
+                </button>
+              )}
+            </span>
           </div>
         </div>
       </div>
 
-      {showCreateForm && (
+      {!user && showLogin && <AdminLoginForm onClose={() => setShowLogin(false)} />}
+
+      {showCreateForm && user && (
         <CreateTournamentForm onCreate={handleCreate} onCancel={() => setShowCreateForm(false)} />
       )}
 
@@ -478,6 +490,54 @@ function MatchBox(props: {
           readOnly={readOnly}
         />
       )}
+    </div>
+  );
+}
+
+function AdminLoginForm(props: { onClose: () => void }) {
+  const { onClose } = props;
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    setError('');
+    setSubmitting(true);
+    try {
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+      onClose();
+    } catch (e) {
+      setError('Anmeldung fehlgeschlagen. E-Mail oder Passwort prüfen.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="create-form">
+      <h3>Admin-Login</h3>
+      <label htmlFor="admin-email">E-Mail</label>
+      <input id="admin-email" type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="du@example.com" />
+      <label htmlFor="admin-pw">Passwort</label>
+      <input
+        id="admin-pw"
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSubmit();
+        }}
+      />
+      {error && <p className="form-error">{error}</p>}
+      <div className="form-actions">
+        <button className="btn-primary" type="button" onClick={handleSubmit} disabled={submitting}>
+          {submitting ? 'Prüfe …' : 'Anmelden'}
+        </button>
+        <button className="btn-secondary" type="button" onClick={onClose}>
+          Abbrechen
+        </button>
+      </div>
     </div>
   );
 }
