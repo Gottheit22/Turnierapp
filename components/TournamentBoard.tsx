@@ -16,7 +16,8 @@ import {
   buildBracket,
   roundLabel,
   chooseGroupCount,
-  buildGroups
+  buildGroups,
+  shuffleArray
 } from '@/lib/tournament';
 
 type Status = '' | 'loading' | 'saving' | 'saved' | 'error';
@@ -132,8 +133,9 @@ export default function TournamentBoard() {
   };
 
   const handleCreate = async (name: string, participants: string[]) => {
-    const groupCount = chooseGroupCount(participants.length);
-    const groups = buildGroups(participants, groupCount);
+    const shuffled = shuffleArray(participants);
+    const groupCount = chooseGroupCount(shuffled.length);
+    const groups = buildGroups(shuffled, groupCount);
     const ref = await addDoc(tournamentsCollectionRef, {
       name,
       participants,
@@ -349,6 +351,7 @@ function GroupPanel(props: {
             <th>Sp.</th>
             <th>Pkt.</th>
             <th>Sätze</th>
+            <th>Spiele</th>
           </tr>
         </thead>
         <tbody>
@@ -363,6 +366,9 @@ function GroupPanel(props: {
               <td className="pts">{row.points}</td>
               <td>
                 {row.setsWon}:{row.setsLost}
+              </td>
+              <td>
+                {row.gamesWon}:{row.gamesLost}
               </td>
             </tr>
           ))}
