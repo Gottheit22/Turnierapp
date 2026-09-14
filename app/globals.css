@@ -74,6 +74,24 @@ body {
   flex-wrap: wrap;
   margin-top: 16px;
 }
+.tournament-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.tournament-select {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-family: 'Inter';
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 180px;
+}
 .tool-btn {
   background: rgba(246, 243, 236, 0.12);
   border: 1px solid rgba(246, 243, 236, 0.4);
@@ -110,25 +128,10 @@ h2.section-title {
 }
 
 .groups {
-  display: flex;
-  gap: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
   margin-top: 6px;
-  align-items: stretch;
-}
-.net-divider {
-  width: 24px;
-  flex: 0 0 24px;
-  position: relative;
-}
-.net-divider::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 8px;
-  bottom: 8px;
-  width: 0;
-  border-left: 3px dashed #c9c2b2;
-  transform: translateX(-50%);
 }
 .group-panel {
   flex: 1 1 0;
@@ -410,5 +413,149 @@ table.standings .badge {
   .bracket-col {
     flex-direction: row;
     flex-wrap: wrap;
+  }
+}
+
+/* Turnierauswahl, Erstell-Formular, Archiv, generische KO-Spalten */
+.archived-note {
+  background: #fff3e0;
+  border: 1px solid #f0c987;
+  color: #8a5a1d;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin: 14px 0 0;
+}
+
+.create-form {
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid #e9e4d8;
+  padding: 20px;
+  margin-top: 20px;
+  box-shadow: var(--shadow);
+}
+.create-form h3 {
+  margin: 0 0 4px;
+  font-family: 'Big Shoulders', sans-serif;
+  font-size: 20px;
+  color: var(--ink);
+}
+.create-form label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  margin: 14px 0 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.create-form input[type='text'],
+.create-form textarea {
+  width: 100%;
+  border: 1px solid #d8d2c2;
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-family: 'Inter';
+  font-size: 14px;
+  background: #fcfbf7;
+  color: var(--ink);
+}
+.create-form textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+.create-form .form-hint {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  margin: 6px 0 0;
+}
+.create-form .form-error {
+  font-size: 12.5px;
+  color: #b3261e;
+  margin: 8px 0 0;
+  font-weight: 600;
+}
+.create-form .form-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+.btn-primary {
+  background: var(--clay);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 9px 18px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.btn-secondary {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid #d8d2c2;
+  border-radius: 999px;
+  padding: 9px 18px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.empty-state {
+  background: #fff;
+  border: 1px dashed #d8d2c2;
+  border-radius: 14px;
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--ink-soft);
+  margin-top: 16px;
+  font-size: 14px;
+}
+
+.bracket-round {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 210px;
+}
+.round-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--ink-soft);
+  font-weight: 700;
+  margin-bottom: 10px;
+  text-align: center;
+}
+.bracket-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 20px;
+  flex: 1;
+}
+.champion-col {
+  align-items: center;
+  justify-content: center;
+}
+.champion-col .champion-box {
+  margin-top: 0;
+}
+
+@media (max-width: 760px) {
+  .groups {
+    grid-template-columns: 1fr;
+  }
+  .bracket-grid {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .bracket-round {
+    min-width: 0;
   }
 }
