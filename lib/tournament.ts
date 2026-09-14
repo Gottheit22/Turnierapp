@@ -77,18 +77,30 @@ export function buildGroups(participants: string[], groupCount: number): GroupIn
   });
 }
 
+/** Mischt eine Liste zufällig (Fisher-Yates), ohne das Original-Array zu verändern. */
+export function shuffleArray<T>(list: T[]): T[] {
+  const arr = [...list];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 export type StandingRow = {
   name: string;
   points: number;
   played: number;
   setsWon: number;
   setsLost: number;
+  gamesWon: number;
+  gamesLost: number;
 };
 
 export function groupStandings(matches: SimpleMatch[], sets: SetsMap, players: string[]): StandingRow[] {
   const stat: Record<string, StandingRow> = {};
   players.forEach((p) => {
-    stat[p] = { name: p, points: 0, played: 0, setsWon: 0, setsLost: 0 };
+    stat[p] = { name: p, points: 0, played: 0, setsWon: 0, setsLost: 0, gamesWon: 0, gamesLost: 0 };
   });
   matches.forEach((m) => {
     const r = evalMatch(sets[m.id]);
@@ -96,6 +108,28 @@ export function groupStandings(matches: SimpleMatch[], sets: SetsMap, players: s
     stat[m.p1].setsLost += r.bSets;
     stat[m.p2].setsWon += r.bSets;
     stat[m.p2].setsLost += r.aSets;
+
+    const matchSets = sets[m.id] || emptyMatchSets();
+    matchSets.forEach((s, idx) => {
+      if (s.a !== '' && s.b !== '') {
+        const av = Number(s.a);
+        const bv = Number(s.b);
+        if (!isNaN(av) && !isNaN(bv) && av !== bv) {
+          if (idx === 2) {
+            // Match-Tiebreak (3. Satz): zählt nur als 1:0 Spiele für die Siegerin,
+            // nicht die tatsächlichen Tiebreak-Punkte.
+            if (av > bv) stat[m.p1].gamesWon += 1;
+            else stat[m.p2].gamesWon += 1;
+          } else {
+            stat[m.p1].gamesWon += av;
+            stat[m.p1].gamesLost += bv;
+            stat[m.p2].gamesWon += bv;
+            stat[m.p2].gamesLost += av;
+          }
+        }
+      }
+    });
+
     if (r.winner) {
       stat[m.p1].played++;
       stat[m.p2].played++;
