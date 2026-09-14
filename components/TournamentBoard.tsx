@@ -301,38 +301,40 @@ function MatchRow(props: {
   const safeSets = sets || [{ a: '', b: '' }, { a: '', b: '' }, { a: '', b: '' }];
   const r = evalMatch(safeSets as any);
   return (
-    <div className="match-row">
-      <div className="match-players">
-        <span className={'pname' + (r.winner === 'p1' ? ' winner' : '')}>{p1}</span>
-        <span className="vs">vs.</span>
-        <span className={'pname' + (r.winner === 'p2' ? ' winner' : '')}>{p2}</span>
+    <div className="scoreboard">
+      <div className="scoreboard-labels">
+        <span></span>
+        <span>S1</span>
+        <span>S2</span>
+        <span>S3</span>
       </div>
-      <div className="sets-input">
+      <div className={'scoreboard-row' + (r.winner === 'p1' ? ' winner' : '')}>
+        <div className="scoreboard-name">{p1}</div>
         {[0, 1, 2].map((idx) => (
-          <div className="set-group" key={idx}>
-            <label>Satz {idx + 1}</label>
-            <div className="set-pair">
-              <input
-                type="number"
-                min={0}
-                max={20}
-                value={safeSets[idx].a}
-                onChange={(e) => onSetChange(matchId, idx, 'a', e.target.value)}
-              />
-              <span>:</span>
-              <input
-                type="number"
-                min={0}
-                max={20}
-                value={safeSets[idx].b}
-                onChange={(e) => onSetChange(matchId, idx, 'b', e.target.value)}
-              />
-            </div>
+          <div className="scoreboard-cell" key={idx}>
+            <input
+              type="number"
+              min={0}
+              max={20}
+              value={safeSets[idx].a}
+              onChange={(e) => onSetChange(matchId, idx, 'a', e.target.value)}
+            />
           </div>
         ))}
       </div>
-      <div className={'result-tag' + (r.winner ? ' decided' : '')}>
-        {r.aSets}:{r.bSets}
+      <div className={'scoreboard-row' + (r.winner === 'p2' ? ' winner' : '')}>
+        <div className="scoreboard-name">{p2}</div>
+        {[0, 1, 2].map((idx) => (
+          <div className="scoreboard-cell" key={idx}>
+            <input
+              type="number"
+              min={0}
+              max={20}
+              value={safeSets[idx].b}
+              onChange={(e) => onSetChange(matchId, idx, 'b', e.target.value)}
+            />
+          </div>
+        ))}
       </div>
     </div>
   );
