@@ -107,6 +107,15 @@ body {
 .tool-btn:hover {
   background: rgba(246, 243, 236, 0.22);
 }
+.admin-area {
+  margin-left: auto;
+}
+.tool-btn-ghost {
+  background: transparent;
+  border-color: rgba(246, 243, 236, 0.3);
+  font-size: 12px;
+  opacity: 0.85;
+}
 .save-status {
   font-size: 11.5px;
   color: rgba(246, 243, 236, 0.85);
