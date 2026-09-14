@@ -160,22 +160,17 @@ h2.section-title {
 .match-row {
   border-top: 1px solid #eee9dc;
   padding: 12px 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
 }
 .match-row:first-of-type {
   border-top: none;
 }
 .match-players {
-  flex: 1 1 150px;
   font-size: 14.5px;
   font-weight: 600;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 130px;
+  margin-bottom: 8px;
 }
 .match-players .vs {
   font-weight: 400;
@@ -183,68 +178,71 @@ h2.section-title {
   color: var(--ink-soft);
   margin: -2px 0;
 }
-.match-players span.pname.winner {
-  color: var(--clay-dark);
-}
-.match-players span.pname.winner::after {
-  content: ' ✓';
-  font-size: 11px;
-}
 
-.sets-input {
-  display: flex;
-  gap: 8px;
+.scoreboard {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #ddd6c4;
+  box-shadow: var(--shadow);
+  margin-bottom: 14px;
 }
-.set-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-}
-.set-group label {
+.scoreboard-labels {
+  display: grid;
+  grid-template-columns: 1fr repeat(3, 46px);
   font-size: 9.5px;
   text-transform: uppercase;
   letter-spacing: 0.4px;
   color: var(--ink-soft);
+  padding: 4px 0 3px;
+  background: #f6f3ec;
 }
-.set-pair {
+.scoreboard-labels span:not(:first-child) {
+  text-align: center;
+}
+.scoreboard-row {
+  display: grid;
+  grid-template-columns: 1fr repeat(3, 46px);
+}
+.scoreboard-row + .scoreboard-row {
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+.scoreboard-name {
+  background: var(--ink);
+  color: #fff;
+  padding: 9px 12px;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
   display: flex;
   align-items: center;
-  gap: 3px;
+  transition: background 0.2s ease;
 }
-.set-pair input {
-  width: 36px;
-  text-align: center;
-  padding: 5px 1px;
-  border-radius: 6px;
-  border: 1px solid #d8d2c2;
-  font-family: 'Inter';
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  font-size: 13.5px;
-  background: #fcfbf7;
+.scoreboard-row.winner .scoreboard-name {
+  background: var(--clay);
 }
-.set-pair input:focus {
-  outline: none;
-  border-color: var(--clay);
+.scoreboard-cell {
   background: #fff;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  border-left: 1px solid #eee9dc;
 }
-.set-pair span {
-  color: #c9c2b2;
-  font-weight: 600;
-}
-
-.result-tag {
-  min-width: 44px;
+.scoreboard-cell input {
+  width: 100%;
+  border: none;
+  background: transparent;
   text-align: center;
   font-family: 'Big Shoulders', sans-serif;
   font-weight: 700;
-  font-size: 18px;
-  color: var(--ink-soft);
+  font-size: 19px;
+  color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
-.result-tag.decided {
-  color: var(--clay-dark);
+.scoreboard-cell input:focus {
+  outline: 2px solid var(--clay);
+  outline-offset: -2px;
+  background: #fdf9ef;
 }
 
 table.standings {
