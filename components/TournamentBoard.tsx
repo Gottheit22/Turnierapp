@@ -1,75 +1,96 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getDoc, onSnapshot, setDoc } from 'firebase/firestore';
-import { stateDocRef } from '@/lib/firebaseClient';
+import { addDoc, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
+import { tournamentDocRef, tournamentsCollectionRef } from '@/lib/firebaseClient';
 import {
-  groupA,
-  groupB,
-  groupMatchesA,
-  groupMatchesB,
-  emptySetsMap,
+  GroupInfo,
+  SetsMap,
+  StandingRow,
+  BracketMatch,
+  emptyMatchSets,
   evalMatch,
   groupStandings,
   groupComplete,
-  SetsMap,
-  GroupMatch,
-  StandingRow
+  buildQualifierOrder,
+  buildBracket,
+  roundLabel,
+  chooseGroupCount,
+  buildGroups
 } from '@/lib/tournament';
 
 type Status = '' | 'loading' | 'saving' | 'saved' | 'error';
 
+type TournamentDoc = {
+  id: string;
+  name: string;
+  participants: string[];
+  groups: GroupInfo[];
+  sets: SetsMap;
+  status: 'active' | 'archived';
+  createdAt: number;
+};
+
 export default function TournamentBoard() {
-  const [sets, setSets] = useState<SetsMap>(emptySetsMap());
+  const [tournaments, setTournaments] = useState<TournamentDoc[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showArchive, setShowArchive] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const [status, setStatus] = useState<Status>('loading');
+  const [localSets, setLocalSets] = useState<SetsMap>({});
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextRemote = useRef(false);
 
-  // Initiales Laden
+  // Liste aller Turniere live laden
   useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const snap = await getDoc(stateDocRef);
-        if (!active) return;
-        const data = snap.exists() ? snap.data() : null;
-        if (data && data.sets) {
-          setSets({ ...emptySetsMap(), ...data.sets });
-        }
-        setStatus('');
-      } catch (e) {
-        if (active) setStatus('error');
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  // Realtime: Änderungen von anderen Geräten übernehmen
-  useEffect(() => {
+    const q = query(tournamentsCollectionRef, orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(
-      stateDocRef,
+      q,
       (snap) => {
-        if (skipNextRemote.current) {
-          skipNextRemote.current = false;
-          return;
-        }
-        const data = snap.data();
-        if (data && data.sets) setSets({ ...emptySetsMap(), ...data.sets });
+        const list: TournamentDoc[] = snap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            id: d.id,
+            name: data.name || 'Turnier',
+            participants: data.participants || [],
+            groups: data.groups || [],
+            sets: data.sets || {},
+            status: data.status === 'archived' ? 'archived' : 'active',
+            createdAt: data.createdAt || 0
+          };
+        });
+        setTournaments(list);
+        setStatus('');
+        setSelectedId((prev) => {
+          if (prev && list.some((t) => t.id === prev)) return prev;
+          const firstActive = list.find((t) => t.status === 'active');
+          return firstActive ? firstActive.id : list[0]?.id || null;
+        });
       },
       () => setStatus('error')
     );
     return () => unsubscribe();
   }, []);
 
-  const scheduleSave = useCallback((nextSets: SetsMap) => {
+  const selected = tournaments.find((t) => t.id === selectedId) || null;
+
+  // Lokale Eingabe-Ergebnisse mit dem ausgewählten Turnier synchron halten
+  useEffect(() => {
+    if (skipNextRemote.current) {
+      skipNextRemote.current = false;
+      return;
+    }
+    setLocalSets(selected ? selected.sets : {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, JSON.stringify(selected?.sets || {})]);
+
+  const scheduleSave = useCallback((tournamentId: string, nextSets: SetsMap) => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     setStatus('saving');
     saveTimer.current = setTimeout(async () => {
       skipNextRemote.current = true;
       try {
-        await setDoc(stateDocRef, { sets: nextSets, updatedAt: Date.now() }, { merge: true });
+        await setDoc(tournamentDocRef(tournamentId), { sets: nextSets }, { merge: true });
         setStatus('saved');
         setTimeout(() => setStatus(''), 1500);
       } catch (e) {
@@ -79,57 +100,108 @@ export default function TournamentBoard() {
   }, []);
 
   const handleSetChange = (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => {
-    setSets((prev) => {
-      const current = prev[matchId] || [{ a: '', b: '' }, { a: '', b: '' }, { a: '', b: '' }];
-      const nextMatchSets = current.map((s, i) =>
-        i === setIdx ? { ...s, [player]: value } : s
-      ) as SetsMap[string];
+    if (!selected || selected.status === 'archived') return;
+    const tournamentId = selected.id;
+    setLocalSets((prev) => {
+      const current = prev[matchId] || emptyMatchSets();
+      const nextMatchSets = current.map((s, i) => (i === setIdx ? { ...s, [player]: value } : s)) as SetsMap[string];
       const next = { ...prev, [matchId]: nextMatchSets };
-      scheduleSave(next);
+      scheduleSave(tournamentId, next);
       return next;
     });
   };
 
   const handleReset = async () => {
-    if (!confirm('Wirklich alle Ergebnisse zurücksetzen? Das gilt für alle, die den Link nutzen.')) return;
-    const blank = emptySetsMap();
-    setSets(blank);
+    if (!selected) return;
+    if (!confirm(`Wirklich alle Ergebnisse von "${selected.name}" zurücksetzen?`)) return;
+    setLocalSets({});
     skipNextRemote.current = true;
     try {
-      await setDoc(stateDocRef, { sets: blank, updatedAt: Date.now() }, { merge: true });
+      await setDoc(tournamentDocRef(selected.id), { sets: {} }, { merge: true });
     } catch (e) {
       setStatus('error');
     }
   };
 
-  const stA = groupStandings(groupMatchesA, sets, groupA);
-  const stB = groupStandings(groupMatchesB, sets, groupB);
-  const groupsDone = groupComplete(groupMatchesA, sets) && groupComplete(groupMatchesB, sets);
+  const handleToggleArchive = async (t: TournamentDoc) => {
+    try {
+      await setDoc(tournamentDocRef(t.id), { status: t.status === 'archived' ? 'active' : 'archived' }, { merge: true });
+    } catch (e) {
+      setStatus('error');
+    }
+  };
 
-  const sf1 = groupsDone ? { id: 'SF1', p1: stA[0].name, p2: stB[1].name } : null;
-  const sf2 = groupsDone ? { id: 'SF2', p1: stB[0].name, p2: stA[1].name } : null;
-  const sf1Result = sf1 ? evalMatch(sets['SF1']) : null;
-  const sf2Result = sf2 ? evalMatch(sets['SF2']) : null;
-  const finalReady = !!(sf1Result?.winner && sf2Result?.winner);
-  const finalP1 = finalReady ? (sf1Result!.winner === 'p1' ? sf1!.p1 : sf1!.p2) : null;
-  const finalP2 = finalReady ? (sf2Result!.winner === 'p1' ? sf2!.p1 : sf2!.p2) : null;
-  const finalResult = finalReady ? evalMatch(sets['F']) : null;
-  const champion = finalResult?.winner
-    ? finalResult.winner === 'p1'
-      ? finalP1
-      : finalP2
-    : null;
+  const handleCreate = async (name: string, participants: string[]) => {
+    const groupCount = chooseGroupCount(participants.length);
+    const groups = buildGroups(participants, groupCount);
+    const ref = await addDoc(tournamentsCollectionRef, {
+      name,
+      participants,
+      groups,
+      sets: {},
+      status: 'active',
+      createdAt: Date.now()
+    });
+    setSelectedId(ref.id);
+    setShowCreateForm(false);
+  };
+
+  const activeTournaments = tournaments.filter((t) => t.status === 'active');
+  const archivedTournaments = tournaments.filter((t) => t.status === 'archived');
+  const readOnly = selected?.status === 'archived';
 
   return (
     <div className="wrap">
       <div className="hero">
         <div className="hero-inner">
           <h1>TURNIERTABELLE</h1>
-          <p>Gruppenphase, Tabelle und Halbfinale/Finale – live für alle mit diesem Link.</p>
-          <div className="toolbar">
-            <button className="tool-btn" onClick={handleReset} type="button">
-              Zurücksetzen
+          <p>Gruppenphase, Tabelle und KO-Runde – live für alle mit diesem Link, für beliebig viele Turniere gleichzeitig.</p>
+
+          <div className="tournament-bar">
+            {tournaments.length > 0 && (
+              <select
+                className="tournament-select"
+                value={selectedId || ''}
+                onChange={(e) => setSelectedId(e.target.value)}
+              >
+                {activeTournaments.length > 0 && (
+                  <optgroup label="Aktive Turniere">
+                    {activeTournaments.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {showArchive && archivedTournaments.length > 0 && (
+                  <optgroup label="Archiv">
+                    {archivedTournaments.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            )}
+            <button className="tool-btn" onClick={() => setShowCreateForm((v) => !v)} type="button">
+              + Neues Turnier
             </button>
+            {archivedTournaments.length > 0 && (
+              <button className="tool-btn" onClick={() => setShowArchive((v) => !v)} type="button">
+                {showArchive ? 'Archiv ausblenden' : `Archiv anzeigen (${archivedTournaments.length})`}
+              </button>
+            )}
+            {selected && (
+              <button className="tool-btn" onClick={() => handleToggleArchive(selected)} type="button">
+                {selected.status === 'archived' ? 'Reaktivieren' : 'Archivieren'}
+              </button>
+            )}
+            {selected && !readOnly && (
+              <button className="tool-btn" onClick={handleReset} type="button">
+                Ergebnisse zurücksetzen
+              </button>
+            )}
             <span className="save-status">
               {status === 'loading' && 'Lade …'}
               {status === 'saving' && 'Speichere …'}
@@ -140,111 +212,134 @@ export default function TournamentBoard() {
         </div>
       </div>
 
-      <h2 className="section-title">Gruppenphase</h2>
-      <p className="section-sub">Jede gegen jede – Best of 3. Sieg = 2 Punkte, Niederlage = 0 Punkte.</p>
+      {showCreateForm && (
+        <CreateTournamentForm onCreate={handleCreate} onCancel={() => setShowCreateForm(false)} />
+      )}
 
-      <div className="groups">
-        <GroupPanel
-          title="Gruppe A"
-          subtitle={groupA.join(' · ')}
-          matches={groupMatchesA}
-          sets={sets}
+      {!selected && !showCreateForm && (
+        <div className="empty-state">
+          {tournaments.length === 0
+            ? 'Noch kein Turnier angelegt. Klick oben auf „+ Neues Turnier", um loszulegen.'
+            : 'Kein Turnier ausgewählt.'}
+        </div>
+      )}
+
+      {selected && (
+        <TournamentView
+          key={selected.id}
+          tournament={selected}
+          sets={localSets}
           onSetChange={handleSetChange}
-          standings={stA}
-          complete={groupComplete(groupMatchesA, sets)}
+          readOnly={!!readOnly}
         />
-        <div className="net-divider" />
-        <GroupPanel
-          title="Gruppe B"
-          subtitle={groupB.join(' · ')}
-          matches={groupMatchesB}
-          sets={sets}
-          onSetChange={handleSetChange}
-          standings={stB}
-          complete={groupComplete(groupMatchesB, sets)}
-        />
-      </div>
-
-      <h2 className="section-title">KO-Runde</h2>
-      <p className="section-sub">Gruppenerster trifft auf Gruppenzweiten der jeweils anderen Gruppe.</p>
-
-      <div className="bracket-grid">
-        <div className="bracket-col semis">
-          <MatchBox
-            label="Halbfinale 1"
-            locked={!sf1}
-            lockedP1="Sieger Gruppe A"
-            lockedP2="Zweiter Gruppe B"
-            matchId="SF1"
-            p1={sf1?.p1}
-            p2={sf1?.p2}
-            sets={sets['SF1']}
-            onSetChange={handleSetChange}
-          />
-          <MatchBox
-            label="Halbfinale 2"
-            locked={!sf2}
-            lockedP1="Sieger Gruppe B"
-            lockedP2="Zweiter Gruppe A"
-            matchId="SF2"
-            p1={sf2?.p1}
-            p2={sf2?.p2}
-            sets={sets['SF2']}
-            onSetChange={handleSetChange}
-          />
-        </div>
-        <div className="connector">
-          <svg viewBox="0 0 34 200" preserveAspectRatio="none">
-            <path d="M0,40 H17 V100 H0" fill="none" stroke="#C9C2B2" strokeWidth="2" />
-            <path d="M0,160 H17 V100 H0" fill="none" stroke="#C9C2B2" strokeWidth="2" />
-            <path d="M17,100 H34" fill="none" stroke="#C9C2B2" strokeWidth="2" />
-          </svg>
-        </div>
-        <div className="bracket-col">
-          <MatchBox
-            label="Finale"
-            locked={!finalReady}
-            lockedP1="Sieger HF1"
-            lockedP2="Sieger HF2"
-            matchId="F"
-            p1={finalP1 || undefined}
-            p2={finalP2 || undefined}
-            sets={sets['F']}
-            onSetChange={handleSetChange}
-          />
-        </div>
-        <div className="connector">
-          <svg viewBox="0 0 34 60" preserveAspectRatio="none">
-            <path d="M0,30 H34" fill="none" stroke="#C9C2B2" strokeWidth="2" />
-          </svg>
-        </div>
-        <div className="bracket-col champion-col">
-          <div className={'champion-box' + (champion ? ' revealed' : '')}>
-            <span className="cup">🏆</span>
-            <div className="clabel">Turniersieger</div>
-            <div className="cname">{champion || '—'}</div>
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
 
-function GroupPanel(props: {
-  title: string;
-  subtitle: string;
-  matches: GroupMatch[];
+function TournamentView(props: {
+  tournament: TournamentDoc;
   sets: SetsMap;
   onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
-  standings: StandingRow[];
-  complete: boolean;
+  readOnly: boolean;
 }) {
-  const { title, subtitle, matches, sets, onSetChange, standings, complete } = props;
+  const { tournament, sets, onSetChange, readOnly } = props;
+  const groups = tournament.groups;
+
+  const qualifierOrder = buildQualifierOrder(groups, sets);
+  const bracketRounds = qualifierOrder ? buildBracket(qualifierOrder, sets) : [];
+  const finalRound = bracketRounds[bracketRounds.length - 1];
+  const finalMatch = finalRound?.[0];
+  const champion = finalMatch?.result?.winner
+    ? finalMatch.result.winner === 'p1'
+      ? finalMatch.p1
+      : finalMatch.p2
+    : null;
+
+  return (
+    <>
+      {readOnly && <p className="archived-note">Dieses Turnier ist archiviert und wird nur noch angezeigt, nicht mehr bearbeitet.</p>}
+
+      <h2 className="section-title">Gruppenphase</h2>
+      <p className="section-sub">
+        {tournament.participants.length} Teilnehmer:innen in {groups.length}{' '}
+        {groups.length === 1 ? 'Gruppe' : 'Gruppen'} – jede gegen jede, Best of 3. Sieg = 2 Punkte, Niederlage = 0 Punkte.
+      </p>
+
+      <div className="groups">
+        {groups.map((g) => (
+          <GroupPanel
+            key={g.label}
+            group={g}
+            sets={sets}
+            onSetChange={onSetChange}
+            readOnly={readOnly}
+            onlyGroup={groups.length === 1}
+          />
+        ))}
+      </div>
+
+      <h2 className="section-title">KO-Runde</h2>
+      <p className="section-sub">
+        {groups.length === 1
+          ? 'Die beiden Bestplatzierten spielen das Finale.'
+          : 'Gruppensieger und -zweite ziehen über Kreuz in die KO-Runde ein.'}
+      </p>
+
+      {!qualifierOrder ? (
+        <div className="empty-state">Die KO-Runde wird freigeschaltet, sobald alle Gruppen fertig gespielt sind.</div>
+      ) : (
+        <div className="bracket-grid">
+          {bracketRounds.map((roundMatches, ri) => (
+            <div className="bracket-round" key={ri}>
+              <div className="round-label">{roundLabel(bracketRounds.length, ri)}</div>
+              <div className="bracket-col">
+                {roundMatches.map((m) => (
+                  <MatchBox
+                    key={m.id}
+                    matchId={m.id}
+                    locked={!(m.p1 && m.p2)}
+                    lockedP1="TBD"
+                    lockedP2="TBD"
+                    p1={m.p1 || undefined}
+                    p2={m.p2 || undefined}
+                    sets={sets[m.id]}
+                    onSetChange={onSetChange}
+                    readOnly={readOnly}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="bracket-round champion-col">
+            <div className="round-label">Sieger</div>
+            <div className={'champion-box' + (champion ? ' revealed' : '')}>
+              <span className="cup">🏆</span>
+              <div className="cname">{champion || '—'}</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function GroupPanel(props: {
+  group: GroupInfo;
+  sets: SetsMap;
+  onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
+  readOnly: boolean;
+  onlyGroup: boolean;
+}) {
+  const { group, sets, onSetChange, readOnly, onlyGroup } = props;
+  const standings = groupStandings(group.matches, sets, group.players);
+  const complete = groupComplete(group.matches, sets);
+
   return (
     <div className="group-panel">
       <div className="group-head">
-        <h3>{title}</h3>
-        <span>{subtitle}</span>
+        <h3>{onlyGroup ? 'Tabelle' : `Gruppe ${group.label}`}</h3>
+        <span>{group.players.join(' · ')}</span>
       </div>
       <table className="standings">
         <thead>
@@ -262,7 +357,7 @@ function GroupPanel(props: {
               <td>{idx + 1}</td>
               <td>
                 {row.name}
-                {idx < 2 && <span className="badge">HF</span>}
+                {idx < 2 && <span className="badge">KO</span>}
               </td>
               <td>{row.played}</td>
               <td className="pts">{row.points}</td>
@@ -275,7 +370,7 @@ function GroupPanel(props: {
       </table>
       {!complete && <p className="provisional-note">Tabelle ist vorläufig, solange noch Spiele offen sind.</p>}
       <div className="match-list">
-        {matches.map((m) => (
+        {group.matches.map((m) => (
           <MatchRow
             key={m.id}
             matchId={m.id}
@@ -283,6 +378,7 @@ function GroupPanel(props: {
             p2={m.p2}
             sets={sets[m.id]}
             onSetChange={onSetChange}
+            readOnly={readOnly}
           />
         ))}
       </div>
@@ -296,9 +392,10 @@ function MatchRow(props: {
   p2: string;
   sets?: SetsMap[string];
   onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
+  readOnly: boolean;
 }) {
-  const { matchId, p1, p2, sets, onSetChange } = props;
-  const safeSets = sets || [{ a: '', b: '' }, { a: '', b: '' }, { a: '', b: '' }];
+  const { matchId, p1, p2, sets, onSetChange, readOnly } = props;
+  const safeSets = sets || emptyMatchSets();
   const r = evalMatch(safeSets as any);
   return (
     <div className="scoreboard">
@@ -317,6 +414,7 @@ function MatchRow(props: {
               min={0}
               max={20}
               value={safeSets[idx].a}
+              disabled={readOnly}
               onChange={(e) => onSetChange(matchId, idx, 'a', e.target.value)}
             />
           </div>
@@ -331,6 +429,7 @@ function MatchRow(props: {
               min={0}
               max={20}
               value={safeSets[idx].b}
+              disabled={readOnly}
               onChange={(e) => onSetChange(matchId, idx, 'b', e.target.value)}
             />
           </div>
@@ -341,20 +440,19 @@ function MatchRow(props: {
 }
 
 function MatchBox(props: {
-  label: string;
+  matchId: string;
   locked: boolean;
   lockedP1: string;
   lockedP2: string;
-  matchId: string;
   p1?: string;
   p2?: string;
   sets?: SetsMap[string];
   onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
+  readOnly: boolean;
 }) {
-  const { label, locked, lockedP1, lockedP2, matchId, p1, p2, sets, onSetChange } = props;
+  const { matchId, locked, lockedP1, lockedP2, p1, p2, sets, onSetChange, readOnly } = props;
   return (
     <div className="match-box">
-      <div className="box-label">{label}</div>
       {locked ? (
         <>
           <div className="match-players">
@@ -362,11 +460,84 @@ function MatchBox(props: {
             <span className="vs">vs.</span>
             <span className="pname">{lockedP2}</span>
           </div>
-          <div className="lock-msg">Wird freigeschaltet, sobald die Gruppenphase abgeschlossen ist.</div>
+          <div className="lock-msg">Wird freigeschaltet, sobald die vorherige Runde entschieden ist.</div>
         </>
       ) : (
-        <MatchRow matchId={matchId} p1={p1 as string} p2={p2 as string} sets={sets} onSetChange={onSetChange} />
+        <MatchRow
+          matchId={matchId}
+          p1={p1 as string}
+          p2={p2 as string}
+          sets={sets}
+          onSetChange={onSetChange}
+          readOnly={readOnly}
+        />
       )}
+    </div>
+  );
+}
+
+function CreateTournamentForm(props: {
+  onCreate: (name: string, participants: string[]) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { onCreate, onCancel } = props;
+  const [name, setName] = useState('');
+  const [namesText, setNamesText] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const participants = namesText
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const handleSubmit = async () => {
+    if (!name.trim()) {
+      setError('Bitte einen Turniernamen eingeben.');
+      return;
+    }
+    if (participants.length < 3) {
+      setError('Mindestens 3 Teilnehmer:innen nötig (eine pro Zeile).');
+      return;
+    }
+    setError('');
+    setSubmitting(true);
+    try {
+      await onCreate(name.trim(), participants);
+    } catch (e) {
+      setError('Konnte Turnier nicht anlegen. Bitte nochmal versuchen.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const previewGroupCount = participants.length >= 3 ? Math.max(1, participants.length) : 0;
+
+  return (
+    <div className="create-form">
+      <h3>Neues Turnier erstellen</h3>
+      <label htmlFor="tname">Turniername</label>
+      <input id="tname" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. Herbstturnier 2026" />
+      <label htmlFor="tnames">Teilnehmer:innen (ein Name pro Zeile)</label>
+      <textarea
+        id="tnames"
+        value={namesText}
+        onChange={(e) => setNamesText(e.target.value)}
+        placeholder={'Kathi\nMichelle\nYvonne\n...'}
+      />
+      <p className="form-hint">
+        {participants.length} Name{participants.length === 1 ? '' : 'n'} erkannt
+        {participants.length >= 3 ? ` – Gruppenmodus wird automatisch passend gewählt.` : ''}
+      </p>
+      {error && <p className="form-error">{error}</p>}
+      <div className="form-actions">
+        <button className="btn-primary" type="button" onClick={handleSubmit} disabled={submitting}>
+          {submitting ? 'Erstelle …' : 'Turnier erstellen'}
+        </button>
+        <button className="btn-secondary" type="button" onClick={onCancel}>
+          Abbrechen
+        </button>
+      </div>
     </div>
   );
 }
