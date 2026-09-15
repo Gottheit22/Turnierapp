@@ -215,3 +215,170 @@ export function roundLabel(totalRounds: number, roundIndex: number): string {
   const fromEnd = totalRounds - 1 - roundIndex;
   return ROUND_NAMES[fromEnd] || `KO-Runde ${roundIndex + 1}`;
 }
+
+// ---------------------------------------------------------------------------
+// Double-Elimination-Bracket
+// ---------------------------------------------------------------------------
+
+export type TournamentFormat = 'groups' | 'double-elim';
+
+export function isPowerOfTwo(n: number): boolean {
+  return n >= 2 && (n & (n - 1)) === 0;
+}
+
+export type DEMatch = {
+  id: string;
+  p1: string | null;
+  p2: string | null;
+  result: EvalResult | null;
+};
+
+export type DoubleElimBracket = {
+  winners: DEMatch[][];
+  losers: DEMatch[][];
+  grandFinal: DEMatch;
+  grandFinalReset: DEMatch | null;
+};
+
+function deWinnerName(m: DEMatch): string | null {
+  return m.result?.winner ? (m.result.winner === 'p1' ? m.p1 : m.p2) : null;
+}
+function deLoserName(m: DEMatch): string | null {
+  return m.result?.winner ? (m.result.winner === 'p1' ? m.p2 : m.p1) : null;
+}
+
+/**
+ * Baut einen kompletten Double-Elimination-Bracket. `participants.length`
+ * muss eine Zweierpotenz (>=4) sein.
+ */
+export function buildDoubleElimination(participants: string[], sets: SetsMap): DoubleElimBracket {
+  const prefix = 'DE';
+  const r = Math.log2(participants.length);
+
+  // Gewinner-Baum (Winners Bracket)
+  let wbCurrent: (string | null)[] = participants;
+  const winners: DEMatch[][] = [];
+  const wbLosersByRound: (string | null)[][] = [];
+  let wri = 0;
+  while (wbCurrent.length > 1) {
+    const matches: DEMatch[] = [];
+    const next: (string | null)[] = [];
+    const losers: (string | null)[] = [];
+    for (let i = 0; i < wbCurrent.length; i += 2) {
+      const p1 = wbCurrent[i];
+      const p2 = wbCurrent[i + 1];
+      const id = `${prefix}-WB-R${wri}-M${i / 2}`;
+      const ready = !!(p1 && p2);
+      const result = ready ? evalMatch(sets[id]) : null;
+      const m: DEMatch = { id, p1, p2, result };
+      matches.push(m);
+      next.push(deWinnerName(m));
+      losers.push(deLoserName(m));
+    }
+    winners.push(matches);
+    wbLosersByRound.push(losers);
+    wbCurrent = next;
+    wri++;
+  }
+
+  // Verlierer-Baum (Losers Bracket): abwechselnd "Minor"-Runden (LB-Überlebende
+  // spielen untereinander) und "Major"-Runden (LB-Überlebende treffen frische
+  // Verliererinnen aus dem Gewinner-Baum).
+  const losers: DEMatch[][] = [];
+  let lbCurrent: (string | null)[] = [];
+  let lri = 0;
+
+  for (let wbRound = 0; wbRound < r - 1; wbRound++) {
+    const incoming = wbLosersByRound[wbRound];
+
+    if (wbRound === 0) {
+      const matches: DEMatch[] = [];
+      const next: (string | null)[] = [];
+      for (let i = 0; i < incoming.length; i += 2) {
+        const p1 = incoming[i];
+        const p2 = incoming[i + 1];
+        const id = `${prefix}-LB-R${lri}-M${i / 2}`;
+        const ready = !!(p1 && p2);
+        const result = ready ? evalMatch(sets[id]) : null;
+        const m: DEMatch = { id, p1, p2, result };
+        matches.push(m);
+        next.push(deWinnerName(m));
+      }
+      losers.push(matches);
+      lbCurrent = next;
+      lri++;
+    } else {
+      // Major-Runde
+      const matches: DEMatch[] = [];
+      const next: (string | null)[] = [];
+      for (let i = 0; i < lbCurrent.length; i++) {
+        const p1 = lbCurrent[i];
+        const p2 = incoming[i];
+        const id = `${prefix}-LB-R${lri}-M${i}`;
+        const ready = !!(p1 && p2);
+        const result = ready ? evalMatch(sets[id]) : null;
+        const m: DEMatch = { id, p1, p2, result };
+        matches.push(m);
+        next.push(deWinnerName(m));
+      }
+      losers.push(matches);
+      lbCurrent = next;
+      lri++;
+
+      // Direkt anschließende Minor-Runde, falls mehr als eine Überlebende übrig ist.
+      if (lbCurrent.length > 1) {
+        const matches2: DEMatch[] = [];
+        const next2: (string | null)[] = [];
+        for (let i = 0; i < lbCurrent.length; i += 2) {
+          const p1 = lbCurrent[i];
+          const p2 = lbCurrent[i + 1];
+          const id = `${prefix}-LB-R${lri}-M${i / 2}`;
+          const ready = !!(p1 && p2);
+          const result = ready ? evalMatch(sets[id]) : null;
+          const m: DEMatch = { id, p1, p2, result };
+          matches2.push(m);
+          next2.push(deWinnerName(m));
+        }
+        losers.push(matches2);
+        lbCurrent = next2;
+        lri++;
+      }
+    }
+  }
+
+  // Verlierer-Finale: letzte LB-Überlebende gegen die Verliererin des Gewinner-Finales.
+  const wbFinalLoser = wbLosersByRound[r - 1]?.[0] ?? null;
+  const lbFinalP1 = lbCurrent[0] ?? null;
+  const lbFinalId = `${prefix}-LB-R${lri}-M0`;
+  const lbFinalReady = !!(lbFinalP1 && wbFinalLoser);
+  const lbFinalResult = lbFinalReady ? evalMatch(sets[lbFinalId]) : null;
+  const lbFinalMatch: DEMatch = { id: lbFinalId, p1: lbFinalP1, p2: wbFinalLoser, result: lbFinalResult };
+  losers.push([lbFinalMatch]);
+  const lbChampion = deWinnerName(lbFinalMatch);
+
+  // Grand Final
+  const wbChampion = wbCurrent[0] ?? null;
+  const gfId = `${prefix}-GF`;
+  const gfReady = !!(wbChampion && lbChampion);
+  const gfResult = gfReady ? evalMatch(sets[gfId]) : null;
+  const grandFinal: DEMatch = { id: gfId, p1: wbChampion, p2: lbChampion, result: gfResult };
+
+  // Bracket-Reset: nur nötig, wenn die Verlierer-Baum-Siegerin das erste Grand
+  // Final gewinnt (dann steht es 1 Niederlage zu 1 Niederlage, Entscheidung nötig).
+  let grandFinalReset: DEMatch | null = null;
+  if (gfResult?.winner === 'p2') {
+    const gfrId = `${prefix}-GF-RESET`;
+    const gfrResult = evalMatch(sets[gfrId]);
+    grandFinalReset = { id: gfrId, p1: wbChampion, p2: lbChampion, result: gfrResult };
+  }
+
+  return { winners, losers, grandFinal, grandFinalReset };
+}
+
+export function wbRoundLabel(totalRounds: number, idx: number): string {
+  return idx === totalRounds - 1 ? 'Gewinner-Finale' : `Gewinnerrunde ${idx + 1}`;
+}
+
+export function lbRoundLabel(totalRounds: number, idx: number): string {
+  return idx === totalRounds - 1 ? 'Verlierer-Finale' : `Verliererrunde ${idx + 1}`;
+}
