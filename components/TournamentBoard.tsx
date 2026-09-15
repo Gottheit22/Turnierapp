@@ -9,6 +9,8 @@ import {
   SetsMap,
   StandingRow,
   BracketMatch,
+  TournamentFormat,
+  DEMatch,
   emptyMatchSets,
   evalMatch,
   groupStandings,
@@ -18,7 +20,11 @@ import {
   roundLabel,
   chooseGroupCount,
   buildGroups,
-  shuffleArray
+  shuffleArray,
+  isPowerOfTwo,
+  buildDoubleElimination,
+  wbRoundLabel,
+  lbRoundLabel
 } from '@/lib/tournament';
 
 type Status = '' | 'loading' | 'saving' | 'saved' | 'error';
@@ -28,6 +34,7 @@ type TournamentDoc = {
   name: string;
   participants: string[];
   groups: GroupInfo[];
+  format: TournamentFormat;
   sets: SetsMap;
   status: 'active' | 'archived';
   createdAt: number;
@@ -64,6 +71,7 @@ export default function TournamentBoard() {
             name: data.name || 'Turnier',
             participants: data.participants || [],
             groups: data.groups || [],
+            format: data.format === 'double-elim' ? 'double-elim' : 'groups',
             sets: data.sets || {},
             status: data.status === 'archived' ? 'archived' : 'active',
             createdAt: data.createdAt || 0
@@ -125,14 +133,18 @@ export default function TournamentBoard() {
     }
   };
 
-  const handleCreate = async (name: string, participants: string[]) => {
+  const handleCreate = async (name: string, participants: string[], format: TournamentFormat) => {
     const shuffled = shuffleArray(participants);
-    const groupCount = chooseGroupCount(shuffled.length);
-    const groups = buildGroups(shuffled, groupCount);
+    let groups: GroupInfo[] = [];
+    if (format === 'groups') {
+      const groupCount = chooseGroupCount(shuffled.length);
+      groups = buildGroups(shuffled, groupCount);
+    }
     const ref = await addDoc(tournamentsCollectionRef, {
       name,
-      participants,
+      participants: shuffled,
       groups,
+      format,
       sets: {},
       status: 'active',
       createdAt: Date.now()
@@ -279,8 +291,10 @@ function TournamentCard(props: { tournament: TournamentDoc; onClick: () => void;
     <button className={'tournament-card' + (archived ? ' archived' : '')} onClick={onClick} type="button">
       <div className="tournament-card-name">{tournament.name}</div>
       <div className="tournament-card-meta">
-        {tournament.participants.length} Teilnehmer:innen · {tournament.groups.length}{' '}
-        {tournament.groups.length === 1 ? 'Gruppe' : 'Gruppen'}
+        {tournament.participants.length} Teilnehmer:innen ·{' '}
+        {tournament.format === 'double-elim'
+          ? 'Double-Elimination'
+          : `${tournament.groups.length} ${tournament.groups.length === 1 ? 'Gruppe' : 'Gruppen'}`}
       </div>
       {archived && <span className="archived-tag">Archiviert</span>}
     </button>
@@ -288,6 +302,33 @@ function TournamentCard(props: { tournament: TournamentDoc; onClick: () => void;
 }
 
 function TournamentView(props: {
+  tournament: TournamentDoc;
+  sets: SetsMap;
+  onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
+  readOnly: boolean;
+}) {
+  const { tournament, sets, onSetChange, readOnly } = props;
+
+  if (tournament.format === 'double-elim') {
+    return (
+      <>
+        {readOnly && (
+          <p className="archived-note">Dieses Turnier ist archiviert und wird nur noch angezeigt, nicht mehr bearbeitet.</p>
+        )}
+        <DoubleEliminationView tournament={tournament} sets={sets} onSetChange={onSetChange} readOnly={readOnly} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      {readOnly && <p className="archived-note">Dieses Turnier ist archiviert und wird nur noch angezeigt, nicht mehr bearbeitet.</p>}
+      <GroupsKOView tournament={tournament} sets={sets} onSetChange={onSetChange} readOnly={readOnly} />
+    </>
+  );
+}
+
+function GroupsKOView(props: {
   tournament: TournamentDoc;
   sets: SetsMap;
   onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
@@ -308,8 +349,6 @@ function TournamentView(props: {
 
   return (
     <>
-      {readOnly && <p className="archived-note">Dieses Turnier ist archiviert und wird nur noch angezeigt, nicht mehr bearbeitet.</p>}
-
       <h2 className="section-title">Gruppenphase</h2>
       <p className="section-sub">
         {tournament.participants.length} Teilnehmer:innen in {groups.length}{' '}
@@ -371,6 +410,110 @@ function TournamentView(props: {
         </div>
       )}
     </>
+  );
+}
+
+function DoubleEliminationView(props: {
+  tournament: TournamentDoc;
+  sets: SetsMap;
+  onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
+  readOnly: boolean;
+}) {
+  const { tournament, sets, onSetChange, readOnly } = props;
+  const bracket = buildDoubleElimination(tournament.participants, sets);
+
+  const finalDecision = bracket.grandFinalReset || bracket.grandFinal;
+  const champion = finalDecision.result?.winner
+    ? finalDecision.result.winner === 'p1'
+      ? finalDecision.p1
+      : finalDecision.p2
+    : null;
+
+  return (
+    <>
+      <p className="section-sub">
+        {tournament.participants.length} Teilnehmer:innen · Double-Elimination – zwei Niederlagen bedeuten das Aus.
+      </p>
+
+      <h2 className="section-title">Gewinner-Bracket</h2>
+      <div className="bracket-grid">
+        {bracket.winners.map((round, ri) => (
+          <div className="bracket-round" key={'wb' + ri}>
+            <div className="round-label">{wbRoundLabel(bracket.winners.length, ri)}</div>
+            <div className="bracket-col">
+              {round.map((m) => (
+                <DEMatchBox key={m.id} match={m} sets={sets} onSetChange={onSetChange} readOnly={readOnly} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <h2 className="section-title">Verlierer-Bracket</h2>
+      <div className="bracket-grid">
+        {bracket.losers.map((round, ri) => (
+          <div className="bracket-round" key={'lb' + ri}>
+            <div className="round-label">{lbRoundLabel(bracket.losers.length, ri)}</div>
+            <div className="bracket-col">
+              {round.map((m) => (
+                <DEMatchBox key={m.id} match={m} sets={sets} onSetChange={onSetChange} readOnly={readOnly} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <h2 className="section-title">Grand Final</h2>
+      <p className="section-sub">
+        Gewinner-Bracket-Siegerin gegen Verlierer-Bracket-Siegerin. Gewinnt die Verlierer-Bracket-Siegerin, folgt ein
+        Entscheidungsspiel (beide stehen dann bei einer Niederlage).
+      </p>
+      <div className="bracket-grid">
+        <div className="bracket-round">
+          <div className="round-label">Grand Final</div>
+          <div className="bracket-col">
+            <DEMatchBox match={bracket.grandFinal} sets={sets} onSetChange={onSetChange} readOnly={readOnly} />
+          </div>
+        </div>
+        {bracket.grandFinalReset && (
+          <div className="bracket-round">
+            <div className="round-label">Entscheidung</div>
+            <div className="bracket-col">
+              <DEMatchBox match={bracket.grandFinalReset} sets={sets} onSetChange={onSetChange} readOnly={readOnly} />
+            </div>
+          </div>
+        )}
+        <div className="bracket-round champion-col">
+          <div className="round-label">Sieger</div>
+          <div className={'champion-box' + (champion ? ' revealed' : '')}>
+            <span className="cup">🏆</span>
+            <div className="cname">{champion || '—'}</div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function DEMatchBox(props: {
+  match: DEMatch;
+  sets: SetsMap;
+  onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
+  readOnly: boolean;
+}) {
+  const { match, sets, onSetChange, readOnly } = props;
+  return (
+    <MatchBox
+      matchId={match.id}
+      locked={!(match.p1 && match.p2)}
+      lockedP1="TBD"
+      lockedP2="TBD"
+      p1={match.p1 || undefined}
+      p2={match.p2 || undefined}
+      sets={sets[match.id]}
+      onSetChange={onSetChange}
+      readOnly={readOnly}
+    />
   );
 }
 
@@ -579,12 +722,13 @@ function AdminLoginForm(props: { onClose: () => void }) {
 }
 
 function CreateTournamentForm(props: {
-  onCreate: (name: string, participants: string[]) => Promise<void>;
+  onCreate: (name: string, participants: string[], format: TournamentFormat) => Promise<void>;
   onCancel: () => void;
 }) {
   const { onCreate, onCancel } = props;
   const [name, setName] = useState('');
   const [namesText, setNamesText] = useState('');
+  const [format, setFormat] = useState<TournamentFormat>('groups');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -602,10 +746,16 @@ function CreateTournamentForm(props: {
       setError('Mindestens 3 Teilnehmer:innen nötig (eine pro Zeile).');
       return;
     }
+    if (format === 'double-elim' && !isPowerOfTwo(participants.length)) {
+      setError(
+        `Double-Elimination braucht aktuell eine Zweierpotenz an Teilnehmer:innen (4, 8, 16, 32 …). Du hast ${participants.length} eingetragen.`
+      );
+      return;
+    }
     setError('');
     setSubmitting(true);
     try {
-      await onCreate(name.trim(), participants);
+      await onCreate(name.trim(), participants, format);
     } catch (e) {
       setError('Konnte Turnier nicht anlegen. Bitte nochmal versuchen.');
     } finally {
@@ -613,13 +763,23 @@ function CreateTournamentForm(props: {
     }
   };
 
-  const previewGroupCount = participants.length >= 3 ? Math.max(1, participants.length) : 0;
-
   return (
     <div className="create-form">
       <h3>Neues Turnier erstellen</h3>
       <label htmlFor="tname">Turniername</label>
       <input id="tname" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. Herbstturnier 2026" />
+
+      <label htmlFor="tformat">Turnierformat</label>
+      <select
+        id="tformat"
+        className="tournament-select"
+        value={format}
+        onChange={(e) => setFormat(e.target.value as TournamentFormat)}
+      >
+        <option value="groups">Gruppen + K.-o.-Runde (automatischer Modus je nach Teilnehmerzahl)</option>
+        <option value="double-elim">Double-Elimination (nur bei 4, 8, 16, 32 … Teilnehmer:innen)</option>
+      </select>
+
       <label htmlFor="tnames">Teilnehmer:innen (ein Name pro Zeile)</label>
       <textarea
         id="tnames"
@@ -629,7 +789,8 @@ function CreateTournamentForm(props: {
       />
       <p className="form-hint">
         {participants.length} Name{participants.length === 1 ? '' : 'n'} erkannt
-        {participants.length >= 3 ? ` – Gruppenmodus wird automatisch passend gewählt.` : ''}
+        {participants.length >= 3 && format === 'groups' ? ` – Gruppenmodus wird automatisch passend gewählt.` : ''}
+        {format === 'double-elim' ? ` – Reihenfolge wird vor der Auslosung zufällig gemischt.` : ''}
       </p>
       {error && <p className="form-error">{error}</p>}
       <div className="form-actions">
