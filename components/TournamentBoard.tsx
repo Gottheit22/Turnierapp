@@ -79,7 +79,7 @@ export default function TournamentBoard() {
             participants: data.participants || [],
             groups: data.groups || [],
             format: data.format === 'double-elim' ? 'double-elim' : data.format === 'swiss' ? 'swiss' : 'groups',
-            swissRounds: data.swissRounds || [],
+            swissRounds: (data.swissRounds || []).map((r: any) => r?.matches || []),
             sets: data.sets || {},
             status: data.status === 'archived' ? 'archived' : 'active',
             createdAt: data.createdAt || 0
@@ -160,7 +160,7 @@ export default function TournamentBoard() {
       participants: shuffled,
       groups,
       format,
-      swissRounds,
+      swissRounds: swissRounds.map((round) => ({ matches: round })),
       sets: {},
       status: 'active',
       createdAt: Date.now()
@@ -177,7 +177,11 @@ export default function TournamentBoard() {
     if (!nextRound) return;
     const updatedRounds = [...selected.swissRounds, nextRound];
     try {
-      await setDoc(tournamentDocRef(selected.id), { swissRounds: updatedRounds }, { merge: true });
+      await setDoc(
+        tournamentDocRef(selected.id),
+        { swissRounds: updatedRounds.map((round) => ({ matches: round })) },
+        { merge: true }
+      );
     } catch (e) {
       setStatus('error');
     }
