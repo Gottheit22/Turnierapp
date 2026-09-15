@@ -30,7 +30,8 @@ import {
   getSwissConfig,
   computeSwissStandings,
   generateNextSwissRound,
-  getSwissQualifiers
+  getSwissQualifiers,
+  buildSwissKOSeedOrder
 } from '@/lib/tournament';
 
 type Status = '' | 'loading' | 'saving' | 'saved' | 'error';
@@ -651,8 +652,16 @@ function SwissView(props: {
       {qualifiers && (
         <>
           <h2 className="section-title">K.-o.-Runde</h2>
-          <p className="section-sub">Die Qualifizierten wurden nach Swiss-Reihenfolge in den Bracket gesetzt.</p>
-          <SwissKnockout qualifiers={qualifiers} sets={sets} onSetChange={onSetChange} readOnly={readOnly} />
+          <p className="section-sub">
+            Unbesiegte aus der Swiss-Phase wurden auf unterschiedliche Bracket-Hälften gesetzt – sie können sich
+            frühestens im Finale treffen.
+          </p>
+          <SwissKnockout
+            qualifiers={buildSwissKOSeedOrder(qualifiers, standingsMap)}
+            sets={sets}
+            onSetChange={onSetChange}
+            readOnly={readOnly}
+          />
         </>
       )}
     </>
