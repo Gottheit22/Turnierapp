@@ -1,6 +1,5 @@
 'use client';
 
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { addDoc, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
@@ -32,7 +31,12 @@ import {
   computeSwissStandings,
   generateNextSwissRound,
   getSwissQualifiers,
-  buildSwissKOSeedOrder
+  buildSwissKOSeedOrder,
+  GenderGroups,
+  TeamDoublesMatch,
+  assignTeams,
+  generateTeamDoublesRounds,
+  computeTeamDoublesScore
 } from '@/lib/tournament';
 
 type Status = '' | 'loading' | 'saving' | 'saved' | 'error';
@@ -44,6 +48,9 @@ type TournamentDoc = {
   groups: GroupInfo[];
   format: TournamentFormat;
   swissRounds: SimpleMatch[][];
+  teamDoublesRed: GenderGroups;
+  teamDoublesBlue: GenderGroups;
+  teamDoublesRounds: TeamDoublesMatch[][];
   sets: SetsMap;
   status: 'active' | 'archived';
   createdAt: number;
@@ -80,8 +87,18 @@ export default function TournamentBoard() {
             name: data.name || 'Turnier',
             participants: data.participants || [],
             groups: data.groups || [],
-            format: data.format === 'double-elim' ? 'double-elim' : data.format === 'swiss' ? 'swiss' : 'groups',
+            format:
+              data.format === 'double-elim'
+                ? 'double-elim'
+                : data.format === 'swiss'
+                ? 'swiss'
+                : data.format === 'team-doubles'
+                ? 'team-doubles'
+                : 'groups',
             swissRounds: (data.swissRounds || []).map((r: any) => r?.matches || []),
+            teamDoublesRed: data.teamDoublesRed || { men: [], women: [] },
+            teamDoublesBlue: data.teamDoublesBlue || { men: [], women: [] },
+            teamDoublesRounds: (data.teamDoublesRounds || []).map((r: any) => r?.matches || []),
             sets: data.sets || {},
             status: data.status === 'archived' ? 'archived' : 'active',
             createdAt: data.createdAt || 0
@@ -143,10 +160,22 @@ export default function TournamentBoard() {
     }
   };
 
-  const handleCreate = async (name: string, participants: string[], format: TournamentFormat) => {
+  const handleCreate = async (payload: {
+    name: string;
+    format: TournamentFormat;
+    participants: string[];
+    men?: string[];
+    women?: string[];
+    roundsCount?: number;
+  }) => {
+    const { name, format, participants, men, women, roundsCount } = payload;
     const shuffled = shuffleArray(participants);
     let groups: GroupInfo[] = [];
     let swissRounds: SimpleMatch[][] = [];
+    let teamDoublesRed: GenderGroups = { men: [], women: [] };
+    let teamDoublesBlue: GenderGroups = { men: [], women: [] };
+    let teamDoublesRounds: TeamDoublesMatch[][] = [];
+
     if (format === 'groups') {
       const groupCount = chooseGroupCount(shuffled.length);
       groups = buildGroups(shuffled, groupCount);
@@ -156,13 +185,24 @@ export default function TournamentBoard() {
         const round1 = generateNextSwissRound(shuffled, [], {}, config);
         swissRounds = round1 ? [round1] : [];
       }
+    } else if (format === 'team-doubles') {
+      const { red, blue } = assignTeams(men || [], women || []);
+      teamDoublesRed = red;
+      teamDoublesBlue = blue;
+      teamDoublesRounds = generateTeamDoublesRounds(red, blue, roundsCount || 3);
     }
+
+    const teamDoublesParticipants = format === 'team-doubles' ? [...(men || []), ...(women || [])] : shuffled;
+
     const ref = await addDoc(tournamentsCollectionRef, {
       name,
-      participants: shuffled,
+      participants: teamDoublesParticipants,
       groups,
       format,
       swissRounds: swissRounds.map((round) => ({ matches: round })),
+      teamDoublesRed,
+      teamDoublesBlue,
+      teamDoublesRounds: teamDoublesRounds.map((round) => ({ matches: round })),
       sets: {},
       status: 'active',
       createdAt: Date.now()
@@ -334,6 +374,8 @@ function TournamentCard(props: { tournament: TournamentDoc; onClick: () => void;
           ? 'Double-Elimination'
           : tournament.format === 'swiss'
           ? 'Schweizer System'
+          : tournament.format === 'team-doubles'
+          ? 'Mixed-Team-Doppel'
           : `${tournament.groups.length} ${tournament.groups.length === 1 ? 'Gruppe' : 'Gruppen'}`}
       </div>
       {archived && <span className="archived-tag">Archiviert</span>}
@@ -380,10 +422,92 @@ function TournamentView(props: {
     );
   }
 
+  if (tournament.format === 'team-doubles') {
+    return (
+      <>
+        {readOnly && (
+          <p className="archived-note">Dieses Turnier ist archiviert und wird nur noch angezeigt, nicht mehr bearbeitet.</p>
+        )}
+        <TeamDoublesView tournament={tournament} sets={sets} onSetChange={onSetChange} readOnly={readOnly} />
+      </>
+    );
+  }
+
   return (
     <>
       {readOnly && <p className="archived-note">Dieses Turnier ist archiviert und wird nur noch angezeigt, nicht mehr bearbeitet.</p>}
       <GroupsKOView tournament={tournament} sets={sets} onSetChange={onSetChange} readOnly={readOnly} />
+    </>
+  );
+}
+
+function TeamDoublesView(props: {
+  tournament: TournamentDoc;
+  sets: SetsMap;
+  onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
+  readOnly: boolean;
+}) {
+  const { tournament, sets, onSetChange, readOnly } = props;
+  const { teamDoublesRed: red, teamDoublesBlue: blue, teamDoublesRounds: rounds } = tournament;
+  const score = computeTeamDoublesScore(rounds, sets);
+
+  return (
+    <>
+      <p className="section-sub">
+        Mixed-Team-Doppel über {rounds.length} {rounds.length === 1 ? 'Runde' : 'Runden'} – Team Rot gegen Team Blau.
+      </p>
+
+      <div className="td-scoreboard">
+        <div className="td-team td-team-red">
+          <div className="td-team-label">Rot</div>
+          <div className="td-team-score">{score.red}</div>
+        </div>
+        <div className="td-vs">:</div>
+        <div className="td-team td-team-blue">
+          <div className="td-team-score">{score.blue}</div>
+          <div className="td-team-label">Blau</div>
+        </div>
+      </div>
+
+      <div className="groups">
+        <div className="group-panel">
+          <div className="group-head">
+            <h3 style={{ color: 'var(--clay-dark)' }}>Team Rot</h3>
+          </div>
+          <p className="section-sub" style={{ margin: 0 }}>
+            {red.men.join(', ') || '–'} <br />
+            {red.women.join(', ') || '–'}
+          </p>
+        </div>
+        <div className="group-panel">
+          <div className="group-head">
+            <h3 style={{ color: '#2b4a7a' }}>Team Blau</h3>
+          </div>
+          <p className="section-sub" style={{ margin: 0 }}>
+            {blue.men.join(', ') || '–'} <br />
+            {blue.women.join(', ') || '–'}
+          </p>
+        </div>
+      </div>
+
+      {rounds.map((round, ri) => (
+        <div key={ri}>
+          <h2 className="section-title">Runde {ri + 1}</h2>
+          <div>
+            {round.map((m) => (
+              <MatchRow
+                key={m.id}
+                matchId={m.id}
+                p1={m.side1.join(' & ')}
+                p2={m.side2.join(' & ')}
+                sets={sets[m.id]}
+                onSetChange={onSetChange}
+                readOnly={readOnly}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
     </>
   );
 }
@@ -946,17 +1070,35 @@ function AdminLoginForm(props: { onClose: () => void }) {
 }
 
 function CreateTournamentForm(props: {
-  onCreate: (name: string, participants: string[], format: TournamentFormat) => Promise<void>;
+  onCreate: (payload: {
+    name: string;
+    format: TournamentFormat;
+    participants: string[];
+    men?: string[];
+    women?: string[];
+    roundsCount?: number;
+  }) => Promise<void>;
   onCancel: () => void;
 }) {
   const { onCreate, onCancel } = props;
   const [name, setName] = useState('');
   const [namesText, setNamesText] = useState('');
+  const [menText, setMenText] = useState('');
+  const [womenText, setWomenText] = useState('');
+  const [roundsCount, setRoundsCount] = useState(3);
   const [format, setFormat] = useState<TournamentFormat>('groups');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const participants = namesText
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const men = menText
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const women = womenText
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean);
@@ -966,6 +1108,35 @@ function CreateTournamentForm(props: {
       setError('Bitte einen Turniernamen eingeben.');
       return;
     }
+
+    if (format === 'team-doubles') {
+      const total = men.length + women.length;
+      if (total < 4) {
+        setError('Mindestens 4 Teilnehmer:innen nötig (zusammen Männer + Frauen).');
+        return;
+      }
+      if (total % 2 !== 0) {
+        setError(`Die Gesamtzahl muss gerade sein, damit beide Teams gleich groß werden. Aktuell: ${total}.`);
+        return;
+      }
+      if (roundsCount < 1) {
+        setError('Mindestens 1 Runde nötig.');
+        return;
+      }
+      setError('');
+      setSubmitting(true);
+      try {
+        await onCreate({ name: name.trim(), format, participants: [], men, women, roundsCount });
+      } catch (e: any) {
+        console.error('Turnier anlegen fehlgeschlagen:', e);
+        const detail = e?.code || e?.message || String(e);
+        setError(`Konnte Turnier nicht anlegen (${detail}). Bitte nochmal versuchen.`);
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     if (participants.length < 3) {
       setError('Mindestens 3 Teilnehmer:innen nötig (eine pro Zeile).');
       return;
@@ -985,7 +1156,7 @@ function CreateTournamentForm(props: {
     setError('');
     setSubmitting(true);
     try {
-      await onCreate(name.trim(), participants, format);
+      await onCreate({ name: name.trim(), format, participants });
     } catch (e: any) {
       console.error('Turnier anlegen fehlgeschlagen:', e);
       const detail = e?.code || e?.message || String(e);
@@ -1011,21 +1182,49 @@ function CreateTournamentForm(props: {
         <option value="groups">Gruppen + K.-o.-Runde (automatischer Modus je nach Teilnehmerzahl)</option>
         <option value="double-elim">Double-Elimination (nur bei 4, 8, 16, 32 … Teilnehmer:innen)</option>
         <option value="swiss">Schweizer System (nur bei genau 8 oder 16 Teilnehmer:innen)</option>
+        <option value="team-doubles">Mixed-Team-Doppel (Rot vs. Blau)</option>
       </select>
 
-      <label htmlFor="tnames">Teilnehmer:innen (ein Name pro Zeile)</label>
-      <textarea
-        id="tnames"
-        value={namesText}
-        onChange={(e) => setNamesText(e.target.value)}
-        placeholder={'Kathi\nMichelle\nYvonne\n...'}
-      />
-      <p className="form-hint">
-        {participants.length} Name{participants.length === 1 ? '' : 'n'} erkannt
-        {participants.length >= 3 && format === 'groups' ? ` – Gruppenmodus wird automatisch passend gewählt.` : ''}
-        {format === 'double-elim' ? ` – Reihenfolge wird vor der Auslosung zufällig gemischt.` : ''}
-        {format === 'swiss' ? ` – Runde 1 wird zufällig ausgelost, weitere Runden nach Bilanz.` : ''}
-      </p>
+      {format === 'team-doubles' ? (
+        <>
+          <label htmlFor="tmen">Männer (ein Name pro Zeile)</label>
+          <textarea id="tmen" value={menText} onChange={(e) => setMenText(e.target.value)} placeholder={'Peter\nTom\n...'} />
+          <label htmlFor="twomen">Frauen (ein Name pro Zeile)</label>
+          <textarea id="twomen" value={womenText} onChange={(e) => setWomenText(e.target.value)} placeholder={'Maria\nLisa\n...'} />
+          <label htmlFor="trounds">Anzahl Runden</label>
+          <input
+            id="trounds"
+            type="number"
+            min={1}
+            max={10}
+            value={roundsCount}
+            onChange={(e) => setRoundsCount(Math.max(1, Number(e.target.value) || 1))}
+            style={{ maxWidth: 100 }}
+          />
+          <p className="form-hint">
+            {men.length} Mann/Männer, {women.length} Frau(en) erkannt ({men.length + women.length} gesamt) – Teams
+            Rot/Blau werden zufällig gebildet, Geschlechterverteilung möglichst ausgeglichen. Gespielt wird
+            Mixed-Doppel; bleibt je 1 Person pro Team übrig, spielen die Einzel.
+          </p>
+        </>
+      ) : (
+        <>
+          <label htmlFor="tnames">Teilnehmer:innen (ein Name pro Zeile)</label>
+          <textarea
+            id="tnames"
+            value={namesText}
+            onChange={(e) => setNamesText(e.target.value)}
+            placeholder={'Kathi\nMichelle\nYvonne\n...'}
+          />
+          <p className="form-hint">
+            {participants.length} Name{participants.length === 1 ? '' : 'n'} erkannt
+            {participants.length >= 3 && format === 'groups' ? ` – Gruppenmodus wird automatisch passend gewählt.` : ''}
+            {format === 'double-elim' ? ` – Reihenfolge wird vor der Auslosung zufällig gemischt.` : ''}
+            {format === 'swiss' ? ` – Runde 1 wird zufällig ausgelost, weitere Runden nach Bilanz.` : ''}
+          </p>
+        </>
+      )}
+
       {error && <p className="form-error">{error}</p>}
       <div className="form-actions">
         <button className="btn-primary" type="button" onClick={handleSubmit} disabled={submitting}>
