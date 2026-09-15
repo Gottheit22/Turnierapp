@@ -71,11 +71,7 @@ export default function TournamentBoard() {
         });
         setTournaments(list);
         setStatus('');
-        setSelectedId((prev) => {
-          if (prev && list.some((t) => t.id === prev)) return prev;
-          const firstActive = list.find((t) => t.status === 'active');
-          return firstActive ? firstActive.id : list[0]?.id || null;
-        });
+        setSelectedId((prev) => (prev && list.some((t) => t.id === prev) ? prev : null));
       },
       () => setStatus('error')
     );
@@ -154,52 +150,32 @@ export default function TournamentBoard() {
       <div className="hero">
         <div className="hero-inner">
           <h1>TURNIERTABELLE</h1>
-          <p>Gruppenphase, Tabelle und KO-Runde – live für alle mit diesem Link, für beliebig viele Turniere gleichzeitig.</p>
+          <p>
+            {selected
+              ? 'Gruppenphase, Tabelle und KO-Runde – live für alle mit diesem Link.'
+              : 'Turnier auswählen oder ein neues anlegen.'}
+          </p>
 
           <div className="tournament-bar">
-            {tournaments.length > 0 && (
-              <select
-                className="tournament-select"
-                value={selectedId || ''}
-                onChange={(e) => setSelectedId(e.target.value)}
-              >
-                {activeTournaments.length > 0 && (
-                  <optgroup label="Aktive Turniere">
-                    {activeTournaments.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {showArchive && archivedTournaments.length > 0 && (
-                  <optgroup label="Archiv">
-                    {archivedTournaments.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
+            {selected && (
+              <button className="tool-btn" onClick={() => setSelectedId(null)} type="button">
+                ← Zur Übersicht
+              </button>
             )}
-            {archivedTournaments.length > 0 && (
+            {selected && user && (
+              <button className="tool-btn" onClick={() => handleToggleArchive(selected)} type="button">
+                {selected.status === 'archived' ? 'Reaktivieren' : 'Archivieren'}
+              </button>
+            )}
+            {!selected && user && (
+              <button className="tool-btn" onClick={() => setShowCreateForm((v) => !v)} type="button">
+                + Neues Turnier
+              </button>
+            )}
+            {!selected && archivedTournaments.length > 0 && (
               <button className="tool-btn" onClick={() => setShowArchive((v) => !v)} type="button">
                 {showArchive ? 'Archiv ausblenden' : `Archiv anzeigen (${archivedTournaments.length})`}
               </button>
-            )}
-
-            {user && (
-              <>
-                <button className="tool-btn" onClick={() => setShowCreateForm((v) => !v)} type="button">
-                  + Neues Turnier
-                </button>
-                {selected && (
-                  <button className="tool-btn" onClick={() => handleToggleArchive(selected)} type="button">
-                    {selected.status === 'archived' ? 'Reaktivieren' : 'Archivieren'}
-                  </button>
-                )}
-              </>
             )}
 
             <span className="save-status">
@@ -226,19 +202,18 @@ export default function TournamentBoard() {
 
       {!user && showLogin && <AdminLoginForm onClose={() => setShowLogin(false)} />}
 
-      {showCreateForm && user && (
+      {!selected && showCreateForm && user && (
         <CreateTournamentForm onCreate={handleCreate} onCancel={() => setShowCreateForm(false)} />
       )}
 
-      {!selected && !showCreateForm && (
-        <div className="empty-state">
-          {tournaments.length === 0
-            ? 'Noch kein Turnier angelegt. Klick oben auf „+ Neues Turnier", um loszulegen.'
-            : 'Kein Turnier ausgewählt.'}
-        </div>
-      )}
-
-      {selected && (
+      {!selected ? (
+        <TournamentOverview
+          activeTournaments={activeTournaments}
+          archivedTournaments={showArchive ? archivedTournaments : []}
+          onSelect={setSelectedId}
+          loading={status === 'loading'}
+        />
+      ) : (
         <TournamentView
           key={selected.id}
           tournament={selected}
@@ -248,6 +223,67 @@ export default function TournamentBoard() {
         />
       )}
     </div>
+  );
+}
+
+function TournamentOverview(props: {
+  activeTournaments: TournamentDoc[];
+  archivedTournaments: TournamentDoc[];
+  onSelect: (id: string) => void;
+  loading: boolean;
+}) {
+  const { activeTournaments, archivedTournaments, onSelect, loading } = props;
+
+  if (loading && activeTournaments.length === 0 && archivedTournaments.length === 0) {
+    return <div className="empty-state">Lade Turniere …</div>;
+  }
+
+  if (activeTournaments.length === 0 && archivedTournaments.length === 0) {
+    return (
+      <div className="empty-state">
+        Noch kein Turnier angelegt. Klick oben auf „+ Neues Turnier", um loszulegen.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h2 className="section-title">Aktive Turniere</h2>
+      {activeTournaments.length === 0 ? (
+        <div className="empty-state">Kein aktives Turnier. Klick oben auf „+ Neues Turnier", um eins anzulegen.</div>
+      ) : (
+        <div className="tournament-grid">
+          {activeTournaments.map((t) => (
+            <TournamentCard key={t.id} tournament={t} onClick={() => onSelect(t.id)} />
+          ))}
+        </div>
+      )}
+
+      {archivedTournaments.length > 0 && (
+        <>
+          <h2 className="section-title">Archiv</h2>
+          <div className="tournament-grid">
+            {archivedTournaments.map((t) => (
+              <TournamentCard key={t.id} tournament={t} onClick={() => onSelect(t.id)} archived />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TournamentCard(props: { tournament: TournamentDoc; onClick: () => void; archived?: boolean }) {
+  const { tournament, onClick, archived } = props;
+  return (
+    <button className={'tournament-card' + (archived ? ' archived' : '')} onClick={onClick} type="button">
+      <div className="tournament-card-name">{tournament.name}</div>
+      <div className="tournament-card-meta">
+        {tournament.participants.length} Teilnehmer:innen · {tournament.groups.length}{' '}
+        {tournament.groups.length === 1 ? 'Gruppe' : 'Gruppen'}
+      </div>
+      {archived && <span className="archived-tag">Archiviert</span>}
+    </button>
   );
 }
 
