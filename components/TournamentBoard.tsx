@@ -1,5 +1,6 @@
 'use client';
 
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { addDoc, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
