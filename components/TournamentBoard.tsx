@@ -1,6 +1,5 @@
 'use client';
 
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { addDoc, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
@@ -973,8 +972,10 @@ function CreateTournamentForm(props: {
     setSubmitting(true);
     try {
       await onCreate(name.trim(), participants, format);
-    } catch (e) {
-      setError('Konnte Turnier nicht anlegen. Bitte nochmal versuchen.');
+    } catch (e: any) {
+      console.error('Turnier anlegen fehlgeschlagen:', e);
+      const detail = e?.code || e?.message || String(e);
+      setError(`Konnte Turnier nicht anlegen (${detail}). Bitte nochmal versuchen.`);
     } finally {
       setSubmitting(false);
     }
