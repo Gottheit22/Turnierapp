@@ -11,6 +11,8 @@ import {
   BracketMatch,
   TournamentFormat,
   DEMatch,
+  SimpleMatch,
+  SwissConfig,
   emptyMatchSets,
   evalMatch,
   groupStandings,
@@ -24,7 +26,11 @@ import {
   isPowerOfTwo,
   buildDoubleElimination,
   wbRoundLabel,
-  lbRoundLabel
+  lbRoundLabel,
+  getSwissConfig,
+  computeSwissStandings,
+  generateNextSwissRound,
+  getSwissQualifiers
 } from '@/lib/tournament';
 
 type Status = '' | 'loading' | 'saving' | 'saved' | 'error';
@@ -35,6 +41,7 @@ type TournamentDoc = {
   participants: string[];
   groups: GroupInfo[];
   format: TournamentFormat;
+  swissRounds: SimpleMatch[][];
   sets: SetsMap;
   status: 'active' | 'archived';
   createdAt: number;
@@ -71,7 +78,8 @@ export default function TournamentBoard() {
             name: data.name || 'Turnier',
             participants: data.participants || [],
             groups: data.groups || [],
-            format: data.format === 'double-elim' ? 'double-elim' : 'groups',
+            format: data.format === 'double-elim' ? 'double-elim' : data.format === 'swiss' ? 'swiss' : 'groups',
+            swissRounds: data.swissRounds || [],
             sets: data.sets || {},
             status: data.status === 'archived' ? 'archived' : 'active',
             createdAt: data.createdAt || 0
@@ -136,21 +144,43 @@ export default function TournamentBoard() {
   const handleCreate = async (name: string, participants: string[], format: TournamentFormat) => {
     const shuffled = shuffleArray(participants);
     let groups: GroupInfo[] = [];
+    let swissRounds: SimpleMatch[][] = [];
     if (format === 'groups') {
       const groupCount = chooseGroupCount(shuffled.length);
       groups = buildGroups(shuffled, groupCount);
+    } else if (format === 'swiss') {
+      const config = getSwissConfig(shuffled.length);
+      if (config) {
+        const round1 = generateNextSwissRound(shuffled, [], {}, config);
+        swissRounds = round1 ? [round1] : [];
+      }
     }
     const ref = await addDoc(tournamentsCollectionRef, {
       name,
       participants: shuffled,
       groups,
       format,
+      swissRounds,
       sets: {},
       status: 'active',
       createdAt: Date.now()
     });
     setSelectedId(ref.id);
     setShowCreateForm(false);
+  };
+
+  const handleNextSwissRound = async () => {
+    if (!selected || selected.format !== 'swiss') return;
+    const config = getSwissConfig(selected.participants.length);
+    if (!config) return;
+    const nextRound = generateNextSwissRound(selected.participants, selected.swissRounds, localSets, config);
+    if (!nextRound) return;
+    const updatedRounds = [...selected.swissRounds, nextRound];
+    try {
+      await setDoc(tournamentDocRef(selected.id), { swissRounds: updatedRounds }, { merge: true });
+    } catch (e) {
+      setStatus('error');
+    }
   };
 
   const activeTournaments = tournaments.filter((t) => t.status === 'active');
@@ -232,6 +262,8 @@ export default function TournamentBoard() {
           sets={localSets}
           onSetChange={handleSetChange}
           readOnly={!!readOnly}
+          user={user}
+          onNextSwissRound={handleNextSwissRound}
         />
       )}
     </div>
@@ -294,6 +326,8 @@ function TournamentCard(props: { tournament: TournamentDoc; onClick: () => void;
         {tournament.participants.length} Teilnehmer:innen ·{' '}
         {tournament.format === 'double-elim'
           ? 'Double-Elimination'
+          : tournament.format === 'swiss'
+          ? 'Schweizer System'
           : `${tournament.groups.length} ${tournament.groups.length === 1 ? 'Gruppe' : 'Gruppen'}`}
       </div>
       {archived && <span className="archived-tag">Archiviert</span>}
@@ -306,8 +340,10 @@ function TournamentView(props: {
   sets: SetsMap;
   onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
   readOnly: boolean;
+  user: User | null;
+  onNextSwissRound: () => void;
 }) {
-  const { tournament, sets, onSetChange, readOnly } = props;
+  const { tournament, sets, onSetChange, readOnly, user, onNextSwissRound } = props;
 
   if (tournament.format === 'double-elim') {
     return (
@@ -316,6 +352,24 @@ function TournamentView(props: {
           <p className="archived-note">Dieses Turnier ist archiviert und wird nur noch angezeigt, nicht mehr bearbeitet.</p>
         )}
         <DoubleEliminationView tournament={tournament} sets={sets} onSetChange={onSetChange} readOnly={readOnly} />
+      </>
+    );
+  }
+
+  if (tournament.format === 'swiss') {
+    return (
+      <>
+        {readOnly && (
+          <p className="archived-note">Dieses Turnier ist archiviert und wird nur noch angezeigt, nicht mehr bearbeitet.</p>
+        )}
+        <SwissView
+          tournament={tournament}
+          sets={sets}
+          onSetChange={onSetChange}
+          readOnly={readOnly}
+          user={user}
+          onNextRound={onNextSwissRound}
+        />
       </>
     );
   }
@@ -492,6 +546,162 @@ function DoubleEliminationView(props: {
         </div>
       </div>
     </>
+  );
+}
+
+function SwissView(props: {
+  tournament: TournamentDoc;
+  sets: SetsMap;
+  onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
+  readOnly: boolean;
+  user: User | null;
+  onNextRound: () => void;
+}) {
+  const { tournament, sets, onSetChange, readOnly, user, onNextRound } = props;
+  const config = getSwissConfig(tournament.participants.length);
+
+  if (!config) {
+    return (
+      <div className="empty-state">
+        Ungültige Teilnehmerzahl für das Schweizer System (aktuell nur 8 oder 16 unterstützt).
+      </div>
+    );
+  }
+
+  const rounds = tournament.swissRounds || [];
+  const standingsMap = computeSwissStandings(tournament.participants, rounds, sets, config);
+  const standingsList = Object.values(standingsMap).sort((a, b) => {
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    if (a.losses !== b.losses) return a.losses - b.losses;
+    return a.name.localeCompare(b.name);
+  });
+
+  const lastRound = rounds[rounds.length - 1];
+  const lastRoundComplete = !lastRound || lastRound.every((m) => evalMatch(sets[m.id]).winner !== null);
+  const canGenerateNext = !readOnly && !!user && lastRoundComplete && rounds.length < config.maxRounds;
+  const qualifiers = getSwissQualifiers(tournament.participants, rounds, sets, config);
+
+  return (
+    <>
+      <p className="section-sub">
+        {tournament.participants.length} Teilnehmer:innen · Schweizer System – {config.winThreshold} Siege
+        qualifizieren, {config.lossThreshold} Niederlagen scheiden aus (max. {config.maxRounds} Runden).
+      </p>
+
+      <h2 className="section-title">Stand</h2>
+      <table className="standings swiss-standings">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Bilanz</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {standingsList.map((s) => (
+            <tr key={s.name} className={s.status === 'qualified' ? 'rank-1' : ''}>
+              <td>{s.name}</td>
+              <td>
+                {s.wins}:{s.losses}
+              </td>
+              <td>
+                {s.status === 'qualified' && <span className="badge">Q</span>}
+                {s.status === 'eliminated' && <span className="status-out">Ausgeschieden</span>}
+                {s.status === 'alive' && <span className="status-alive">im Rennen</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {rounds.map((round, ri) => (
+        <div key={ri}>
+          <h2 className="section-title">Runde {ri + 1}</h2>
+          <div>
+            {round.map((m) => (
+              <MatchRow
+                key={m.id}
+                matchId={m.id}
+                p1={m.p1}
+                p2={m.p2}
+                sets={sets[m.id]}
+                onSetChange={onSetChange}
+                readOnly={readOnly}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {canGenerateNext && (
+        <button className="btn-primary" type="button" onClick={onNextRound} style={{ marginTop: 16, marginBottom: 32 }}>
+          Nächste Runde auslosen
+        </button>
+      )}
+      {!canGenerateNext && !readOnly && !lastRoundComplete && (
+        <p className="form-hint" style={{ marginTop: 12 }}>
+          Nächste Runde wird auslosbar, sobald alle Spiele dieser Runde ein Ergebnis haben.
+        </p>
+      )}
+
+      {qualifiers && (
+        <>
+          <h2 className="section-title">K.-o.-Runde</h2>
+          <p className="section-sub">Die Qualifizierten wurden nach Swiss-Reihenfolge in den Bracket gesetzt.</p>
+          <SwissKnockout qualifiers={qualifiers} sets={sets} onSetChange={onSetChange} readOnly={readOnly} />
+        </>
+      )}
+    </>
+  );
+}
+
+function SwissKnockout(props: {
+  qualifiers: string[];
+  sets: SetsMap;
+  onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
+  readOnly: boolean;
+}) {
+  const { qualifiers, sets, onSetChange, readOnly } = props;
+  const rounds = buildBracket(qualifiers, sets);
+  const finalRound = rounds[rounds.length - 1];
+  const finalMatch = finalRound?.[0];
+  const champion = finalMatch?.result?.winner
+    ? finalMatch.result.winner === 'p1'
+      ? finalMatch.p1
+      : finalMatch.p2
+    : null;
+
+  return (
+    <div className="bracket-grid">
+      {rounds.map((roundMatches, ri) => (
+        <div className="bracket-round" key={ri}>
+          <div className="round-label">{roundLabel(rounds.length, ri)}</div>
+          <div className="bracket-col">
+            {roundMatches.map((m) => (
+              <MatchBox
+                key={m.id}
+                matchId={m.id}
+                locked={!(m.p1 && m.p2)}
+                lockedP1="TBD"
+                lockedP2="TBD"
+                p1={m.p1 || undefined}
+                p2={m.p2 || undefined}
+                sets={sets[m.id]}
+                onSetChange={onSetChange}
+                readOnly={readOnly}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+      <div className="bracket-round champion-col">
+        <div className="round-label">Sieger</div>
+        <div className={'champion-box' + (champion ? ' revealed' : '')}>
+          <span className="cup">🏆</span>
+          <div className="cname">{champion || '—'}</div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -752,6 +962,12 @@ function CreateTournamentForm(props: {
       );
       return;
     }
+    if (format === 'swiss' && !getSwissConfig(participants.length)) {
+      setError(
+        `Schweizer System ist aktuell nur mit genau 8 oder 16 Teilnehmer:innen möglich. Du hast ${participants.length} eingetragen.`
+      );
+      return;
+    }
     setError('');
     setSubmitting(true);
     try {
@@ -778,6 +994,7 @@ function CreateTournamentForm(props: {
       >
         <option value="groups">Gruppen + K.-o.-Runde (automatischer Modus je nach Teilnehmerzahl)</option>
         <option value="double-elim">Double-Elimination (nur bei 4, 8, 16, 32 … Teilnehmer:innen)</option>
+        <option value="swiss">Schweizer System (nur bei genau 8 oder 16 Teilnehmer:innen)</option>
       </select>
 
       <label htmlFor="tnames">Teilnehmer:innen (ein Name pro Zeile)</label>
@@ -791,6 +1008,7 @@ function CreateTournamentForm(props: {
         {participants.length} Name{participants.length === 1 ? '' : 'n'} erkannt
         {participants.length >= 3 && format === 'groups' ? ` – Gruppenmodus wird automatisch passend gewählt.` : ''}
         {format === 'double-elim' ? ` – Reihenfolge wird vor der Auslosung zufällig gemischt.` : ''}
+        {format === 'swiss' ? ` – Runde 1 wird zufällig ausgelost, weitere Runden nach Bilanz.` : ''}
       </p>
       {error && <p className="form-error">{error}</p>}
       <div className="form-actions">
