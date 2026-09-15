@@ -673,14 +673,52 @@ export function generateTeamDoublesRounds(
   return rounds;
 }
 
-export function computeTeamDoublesScore(rounds: TeamDoublesMatch[][], sets: SetsMap): { red: number; blue: number } {
+export type TeamDoublesScoringMode = 'wins' | 'games';
+
+/**
+ * Zählt die "Spiele" (Games) eines Matches. Satz 1+2 zählen mit echten
+ * Ergebnissen, ein Match-Tiebreak (Satz 3) zählt dabei nur als 1:0 für die
+ * Siegerin des Tiebreaks – nicht die tatsächlichen Tiebreak-Punkte.
+ */
+export function matchGames(sets: MatchSets | undefined): { a: number; b: number } {
+  let a = 0;
+  let b = 0;
+  (sets || emptyMatchSets()).forEach((s, idx) => {
+    if (s.a !== '' && s.b !== '') {
+      const av = Number(s.a);
+      const bv = Number(s.b);
+      if (!isNaN(av) && !isNaN(bv) && av !== bv) {
+        if (idx === 2) {
+          if (av > bv) a += 1;
+          else b += 1;
+        } else {
+          a += av;
+          b += bv;
+        }
+      }
+    }
+  });
+  return { a, b };
+}
+
+export function computeTeamDoublesScore(
+  rounds: TeamDoublesMatch[][],
+  sets: SetsMap,
+  mode: TeamDoublesScoringMode = 'wins'
+): { red: number; blue: number } {
   let red = 0;
   let blue = 0;
   rounds.forEach((round) =>
     round.forEach((m) => {
-      const r = evalMatch(sets[m.id]);
-      if (r.winner === 'p1') red++;
-      else if (r.winner === 'p2') blue++;
+      if (mode === 'games') {
+        const g = matchGames(sets[m.id]);
+        red += g.a;
+        blue += g.b;
+      } else {
+        const r = evalMatch(sets[m.id]);
+        if (r.winner === 'p1') red++;
+        else if (r.winner === 'p2') blue++;
+      }
     })
   );
   return { red, blue };
