@@ -519,3 +519,29 @@ export function getSwissQualifiers(
   });
   return qualifiers;
 }
+
+/**
+ * Ordnet die Qualifizierten so für die KO-Runde an, dass unbesiegte
+ * Teilnehmer:innen (0 Niederlagen in der Swiss-Phase) auf unterschiedliche
+ * Bracket-Hälften kommen – sie können sich so frühestens im Finale treffen,
+ * nicht schon im Viertel- oder Halbfinale. Rein deterministisch (keine neue
+ * Zufälligkeit bei jedem Rendern), damit einmal vergebene Match-IDs stabil
+ * bleiben.
+ */
+export function buildSwissKOSeedOrder(
+  qualifiers: string[],
+  standingsMap: Record<string, SwissStanding>
+): string[] {
+  const half = Math.ceil(qualifiers.length / 2);
+  const undefeated = qualifiers.filter((name) => standingsMap[name].losses === 0);
+  const others = qualifiers.filter((name) => standingsMap[name].losses > 0);
+  const firstHalf: string[] = [];
+  const secondHalf: string[] = [];
+  undefeated.forEach((name, i) => {
+    (i % 2 === 0 ? firstHalf : secondHalf).push(name);
+  });
+  others.forEach((name) => {
+    (firstHalf.length < half ? firstHalf : secondHalf).push(name);
+  });
+  return [...firstHalf, ...secondHalf];
+}
