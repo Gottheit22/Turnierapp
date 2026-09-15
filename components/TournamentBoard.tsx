@@ -34,6 +34,7 @@ import {
   buildSwissKOSeedOrder,
   GenderGroups,
   TeamDoublesMatch,
+  TeamDoublesScoringMode,
   assignTeams,
   generateTeamDoublesRounds,
   computeTeamDoublesScore
@@ -51,6 +52,7 @@ type TournamentDoc = {
   teamDoublesRed: GenderGroups;
   teamDoublesBlue: GenderGroups;
   teamDoublesRounds: TeamDoublesMatch[][];
+  teamDoublesScoringMode: TeamDoublesScoringMode;
   sets: SetsMap;
   status: 'active' | 'archived';
   createdAt: number;
@@ -99,6 +101,7 @@ export default function TournamentBoard() {
             teamDoublesRed: data.teamDoublesRed || { men: [], women: [] },
             teamDoublesBlue: data.teamDoublesBlue || { men: [], women: [] },
             teamDoublesRounds: (data.teamDoublesRounds || []).map((r: any) => r?.matches || []),
+            teamDoublesScoringMode: data.teamDoublesScoringMode === 'games' ? 'games' : 'wins',
             sets: data.sets || {},
             status: data.status === 'archived' ? 'archived' : 'active',
             createdAt: data.createdAt || 0
@@ -167,8 +170,9 @@ export default function TournamentBoard() {
     men?: string[];
     women?: string[];
     roundsCount?: number;
+    scoringMode?: TeamDoublesScoringMode;
   }) => {
-    const { name, format, participants, men, women, roundsCount } = payload;
+    const { name, format, participants, men, women, roundsCount, scoringMode } = payload;
     const shuffled = shuffleArray(participants);
     let groups: GroupInfo[] = [];
     let swissRounds: SimpleMatch[][] = [];
@@ -203,6 +207,7 @@ export default function TournamentBoard() {
       teamDoublesRed,
       teamDoublesBlue,
       teamDoublesRounds: teamDoublesRounds.map((round) => ({ matches: round })),
+      teamDoublesScoringMode: scoringMode || 'wins',
       sets: {},
       status: 'active',
       createdAt: Date.now()
@@ -448,13 +453,14 @@ function TeamDoublesView(props: {
   readOnly: boolean;
 }) {
   const { tournament, sets, onSetChange, readOnly } = props;
-  const { teamDoublesRed: red, teamDoublesBlue: blue, teamDoublesRounds: rounds } = tournament;
-  const score = computeTeamDoublesScore(rounds, sets);
+  const { teamDoublesRed: red, teamDoublesBlue: blue, teamDoublesRounds: rounds, teamDoublesScoringMode: mode } = tournament;
+  const score = computeTeamDoublesScore(rounds, sets, mode);
 
   return (
     <>
       <p className="section-sub">
         Mixed-Team-Doppel über {rounds.length} {rounds.length === 1 ? 'Runde' : 'Runden'} – Team Rot gegen Team Blau.
+        Zählweise: {mode === 'games' ? 'gewonnene Spiele (Games)' : 'Matchsiege'}.
       </p>
 
       <div className="td-scoreboard">
@@ -1077,6 +1083,7 @@ function CreateTournamentForm(props: {
     men?: string[];
     women?: string[];
     roundsCount?: number;
+    scoringMode?: TeamDoublesScoringMode;
   }) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -1086,6 +1093,7 @@ function CreateTournamentForm(props: {
   const [menText, setMenText] = useState('');
   const [womenText, setWomenText] = useState('');
   const [roundsCount, setRoundsCount] = useState(3);
+  const [scoringMode, setScoringMode] = useState<TeamDoublesScoringMode>('wins');
   const [format, setFormat] = useState<TournamentFormat>('groups');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -1126,7 +1134,7 @@ function CreateTournamentForm(props: {
       setError('');
       setSubmitting(true);
       try {
-        await onCreate({ name: name.trim(), format, participants: [], men, women, roundsCount });
+        await onCreate({ name: name.trim(), format, participants: [], men, women, roundsCount, scoringMode });
       } catch (e: any) {
         console.error('Turnier anlegen fehlgeschlagen:', e);
         const detail = e?.code || e?.message || String(e);
@@ -1201,6 +1209,16 @@ function CreateTournamentForm(props: {
             onChange={(e) => setRoundsCount(Math.max(1, Number(e.target.value) || 1))}
             style={{ maxWidth: 100 }}
           />
+          <label htmlFor="tscoring">Zählweise</label>
+          <select
+            id="tscoring"
+            className="tournament-select"
+            value={scoringMode}
+            onChange={(e) => setScoringMode(e.target.value as TeamDoublesScoringMode)}
+          >
+            <option value="wins">Nur Matchsiege zählen (1 Punkt pro gewonnenem Match)</option>
+            <option value="games">Gewonnene Spiele (Games) zählen, z. B. 6:3 6:3 → 12:6</option>
+          </select>
           <p className="form-hint">
             {men.length} Mann/Männer, {women.length} Frau(en) erkannt ({men.length + women.length} gesamt) – Teams
             Rot/Blau werden zufällig gebildet, Geschlechterverteilung möglichst ausgeglichen. Gespielt wird
