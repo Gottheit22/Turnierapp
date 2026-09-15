@@ -220,7 +220,7 @@ export function roundLabel(totalRounds: number, roundIndex: number): string {
 // Double-Elimination-Bracket
 // ---------------------------------------------------------------------------
 
-export type TournamentFormat = 'groups' | 'double-elim';
+export type TournamentFormat = 'groups' | 'double-elim' | 'swiss';
 
 export function isPowerOfTwo(n: number): boolean {
   return n >= 2 && (n & (n - 1)) === 0;
@@ -381,4 +381,141 @@ export function wbRoundLabel(totalRounds: number, idx: number): string {
 
 export function lbRoundLabel(totalRounds: number, idx: number): string {
   return idx === totalRounds - 1 ? 'Verlierer-Finale' : `Verliererrunde ${idx + 1}`;
+}
+
+// ---------------------------------------------------------------------------
+// Schweizer System (Swiss), angelehnt an das LoL-Worlds-Format
+// ---------------------------------------------------------------------------
+
+export type SwissConfig = { winThreshold: number; lossThreshold: number; maxRounds: number };
+
+/** Aktuell nur für genau 8 oder 16 Teilnehmer:innen unterstützt. */
+export function getSwissConfig(n: number): SwissConfig | null {
+  if (n === 16) return { winThreshold: 3, lossThreshold: 3, maxRounds: 5 };
+  if (n === 8) return { winThreshold: 2, lossThreshold: 2, maxRounds: 3 };
+  return null;
+}
+
+export type SwissStanding = {
+  name: string;
+  wins: number;
+  losses: number;
+  status: 'alive' | 'qualified' | 'eliminated';
+};
+
+export function computeSwissStandings(
+  participants: string[],
+  rounds: SimpleMatch[][],
+  sets: SetsMap,
+  config: SwissConfig
+): Record<string, SwissStanding> {
+  const stat: Record<string, SwissStanding> = {};
+  participants.forEach((p) => {
+    stat[p] = { name: p, wins: 0, losses: 0, status: 'alive' };
+  });
+  rounds.forEach((round) => {
+    round.forEach((m) => {
+      const r = evalMatch(sets[m.id]);
+      if (r.winner === 'p1') {
+        stat[m.p1].wins++;
+        stat[m.p2].losses++;
+      } else if (r.winner === 'p2') {
+        stat[m.p2].wins++;
+        stat[m.p1].losses++;
+      }
+    });
+  });
+  Object.values(stat).forEach((s) => {
+    if (s.wins >= config.winThreshold) s.status = 'qualified';
+    else if (s.losses >= config.lossThreshold) s.status = 'eliminated';
+  });
+  return stat;
+}
+
+/**
+ * Lost die nächste Swiss-Runde aus: gruppiert alle noch "lebenden" Teilnehmer:innen
+ * nach aktueller Bilanz und paart innerhalb jeder Gruppe zufällig. Gibt null zurück,
+ * wenn die letzte Runde noch nicht komplett entschieden ist, oder wenn die
+ * Swiss-Phase bereits fertig ist (niemand mehr "alive").
+ */
+export function generateNextSwissRound(
+  participants: string[],
+  rounds: SimpleMatch[][],
+  sets: SetsMap,
+  config: SwissConfig
+): SimpleMatch[] | null {
+  const lastRound = rounds[rounds.length - 1];
+  if (lastRound && !lastRound.every((m) => evalMatch(sets[m.id]).winner !== null)) return null;
+  if (rounds.length >= config.maxRounds) return null;
+
+  const standings = computeSwissStandings(participants, rounds, sets, config);
+  const alive = participants.filter((p) => standings[p].status === 'alive');
+  if (alive.length === 0) return null;
+
+  const buckets: Record<string, string[]> = {};
+  alive.forEach((p) => {
+    const key = `${standings[p].wins}-${standings[p].losses}`;
+    (buckets[key] = buckets[key] || []).push(p);
+  });
+
+  const roundIndex = rounds.length;
+  const pairings: SimpleMatch[] = [];
+  let counter = 0;
+  Object.values(buckets).forEach((group) => {
+    const shuffled = shuffleArray(group);
+    for (let i = 0; i + 1 < shuffled.length; i += 2) {
+      pairings.push({ id: `SW-R${roundIndex}-M${counter}`, p1: shuffled[i], p2: shuffled[i + 1] });
+      counter++;
+    }
+  });
+  return pairings;
+}
+
+/**
+ * Gibt die qualifizierten Teilnehmer:innen zurück, sortiert danach, in welcher
+ * Runde sie sich qualifiziert haben (früher = besser gesetzt für die KO-Runde).
+ * Gibt null zurück, solange die Swiss-Phase nicht vollständig abgeschlossen ist.
+ */
+export function getSwissQualifiers(
+  participants: string[],
+  rounds: SimpleMatch[][],
+  sets: SetsMap,
+  config: SwissConfig
+): string[] | null {
+  if (rounds.length < config.maxRounds) {
+    // Kann trotzdem schon fertig sein, wenn zufällig niemand mehr "alive" ist -
+    // dafür sicherheitshalber trotzdem die Standings prüfen.
+    const standings = computeSwissStandings(participants, rounds, sets, config);
+    if (participants.some((p) => standings[p].status === 'alive')) return null;
+  }
+  const lastRound = rounds[rounds.length - 1];
+  if (lastRound && !lastRound.every((m) => evalMatch(sets[m.id]).winner !== null)) return null;
+
+  const standings = computeSwissStandings(participants, rounds, sets, config);
+  if (participants.some((p) => standings[p].status === 'alive')) return null;
+
+  const qualifiedAtRound: Record<string, number> = {};
+  const runningWins: Record<string, number> = {};
+  participants.forEach((p) => (runningWins[p] = 0));
+  rounds.forEach((round, ri) => {
+    round.forEach((m) => {
+      const r = evalMatch(sets[m.id]);
+      if (r.winner === 'p1') runningWins[m.p1]++;
+      else if (r.winner === 'p2') runningWins[m.p2]++;
+      [m.p1, m.p2].forEach((name) => {
+        if (runningWins[name] >= config.winThreshold && qualifiedAtRound[name] === undefined) {
+          qualifiedAtRound[name] = ri;
+        }
+      });
+    });
+  });
+
+  const qualifiers = participants.filter((p) => standings[p].status === 'qualified');
+  qualifiers.sort((a, b) => {
+    const ra = qualifiedAtRound[a] ?? 999;
+    const rb = qualifiedAtRound[b] ?? 999;
+    if (ra !== rb) return ra - rb;
+    return participants.indexOf(a) - participants.indexOf(b);
+  });
+  return qualifiers;
 }
