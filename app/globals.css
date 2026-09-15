@@ -175,6 +175,49 @@ body {
   color: var(--clay-dark);
   font-weight: 600;
 }
+
+.td-scoreboard {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  margin: 10px 0 28px;
+}
+.td-team {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 90px;
+}
+.td-team-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+}
+.td-team-red .td-team-label {
+  color: var(--clay-dark);
+}
+.td-team-blue .td-team-label {
+  color: #2b4a7a;
+}
+.td-team-score {
+  font-family: 'Big Shoulders', sans-serif;
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1;
+}
+.td-team-red .td-team-score {
+  color: var(--clay);
+}
+.td-team-blue .td-team-score {
+  color: #2b4a7a;
+}
+.td-vs {
+  font-family: 'Big Shoulders', sans-serif;
+  font-size: 28px;
+  color: var(--ink-soft);
+}
 .save-status {
   font-size: 11.5px;
   color: rgba(246, 243, 236, 0.85);
