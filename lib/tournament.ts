@@ -220,7 +220,7 @@ export function roundLabel(totalRounds: number, roundIndex: number): string {
 // Double-Elimination-Bracket
 // ---------------------------------------------------------------------------
 
-export type TournamentFormat = 'groups' | 'double-elim' | 'swiss';
+export type TournamentFormat = 'groups' | 'double-elim' | 'swiss' | 'team-doubles';
 
 export function isPowerOfTwo(n: number): boolean {
   return n >= 2 && (n & (n - 1)) === 0;
@@ -544,4 +544,144 @@ export function buildSwissKOSeedOrder(
     (firstHalf.length < half ? firstHalf : secondHalf).push(name);
   });
   return [...firstHalf, ...secondHalf];
+}
+
+// ---------------------------------------------------------------------------
+// Mixed-Team-Doppel (Rot vs. Blau)
+// ---------------------------------------------------------------------------
+
+export type GenderGroups = { men: string[]; women: string[] };
+
+export type TeamDoublesMatch = {
+  id: string;
+  side1: string[]; // 1 (Einzel) oder 2 (Doppel) Namen, immer Team Rot
+  side2: string[]; // dito, immer Team Blau
+};
+
+/**
+ * Teilt Männer und Frauen zufällig auf Team Rot/Blau auf, so ausgeglichen wie
+ * möglich sowohl bei der Geschlechterverteilung pro Team als auch bei der
+ * Gesamtgröße der Teams.
+ */
+export function assignTeams(men: string[], women: string[]): { red: GenderGroups; blue: GenderGroups } {
+  const shuffledMen = shuffleArray(men);
+  const shuffledWomen = shuffleArray(women);
+  const menStartRed = Math.random() < 0.5;
+  const red: GenderGroups = { men: [], women: [] };
+  const blue: GenderGroups = { men: [], women: [] };
+
+  shuffledMen.forEach((name, i) => {
+    const goesRed = menStartRed ? i % 2 === 0 : i % 2 === 1;
+    (goesRed ? red.men : blue.men).push(name);
+  });
+
+  // Ist die Männerzahl ungerade, bekommt eine Seite eine Person mehr –
+  // dann starten die Frauen auf der jeweils anderen Seite, um die
+  // Gesamtgröße der Teams wieder auszugleichen.
+  const menOdd = shuffledMen.length % 2 === 1;
+  const womenStartRed = menOdd ? !menStartRed : Math.random() < 0.5;
+  shuffledWomen.forEach((name, i) => {
+    const goesRed = womenStartRed ? i % 2 === 0 : i % 2 === 1;
+    (goesRed ? red.women : blue.women).push(name);
+  });
+
+  return { red, blue };
+}
+
+function pairUpMixed(men: string[], women: string[]): { pairs: [string, string][]; leftover: string[] } {
+  const sm = shuffleArray(men);
+  const sw = shuffleArray(women);
+  const count = Math.min(sm.length, sw.length);
+  const pairs: [string, string][] = [];
+  for (let i = 0; i < count; i++) pairs.push([sm[i], sw[i]]);
+  const leftover = [...sm.slice(count), ...sw.slice(count)];
+  return { pairs, leftover };
+}
+
+function partnerKey(a: string, b: string): string {
+  return [a, b].sort().join('|');
+}
+
+/**
+ * Erzeugt alle Runden im Voraus (die Zusammensetzung hängt nicht von
+ * Ergebnissen ab). Jede Runde: neue Mixed-Doppel-Paare innerhalb jedes Teams,
+ * gegen ein Paar des anderen Teams. Sucht per Zufalls-Versuchen aktiv nach
+ * Kombinationen ohne wiederholte Partner- oder Gegner-Paarungen; falls das
+ * bei der gegebenen Rundenzahl/Teamgröße nicht vollständig möglich ist, wird
+ * die Kombination mit den wenigsten Wiederholungen genommen.
+ */
+export function generateTeamDoublesRounds(
+  red: GenderGroups,
+  blue: GenderGroups,
+  roundsCount: number
+): TeamDoublesMatch[][] {
+  const usedPartnerCombos = new Set<string>();
+  const usedOpponentCombos = new Set<string>();
+  const rounds: TeamDoublesMatch[][] = [];
+
+  for (let r = 0; r < roundsCount; r++) {
+    let best: {
+      pairsRed: [string, string][];
+      pairsBlue: [string, string][];
+      leftoverRed: string[];
+      leftoverBlue: string[];
+      score: number;
+    } | null = null;
+
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const { pairs: pairsRed, leftover: leftoverRed } = pairUpMixed(red.men, red.women);
+      const { pairs: pairsBlueRaw, leftover: leftoverBlue } = pairUpMixed(blue.men, blue.women);
+      const numMatches = Math.min(pairsRed.length, pairsBlueRaw.length);
+      const pairsBlue = shuffleArray(pairsBlueRaw);
+
+      let score = 0;
+      pairsRed.forEach(([m, w]) => {
+        if (usedPartnerCombos.has(partnerKey(m, w))) score++;
+      });
+      pairsBlue.forEach(([m, w]) => {
+        if (usedPartnerCombos.has(partnerKey(m, w))) score++;
+      });
+      for (let i = 0; i < numMatches; i++) {
+        const [rm, rw] = pairsRed[i];
+        const [bm, bw] = pairsBlue[i];
+        if (usedOpponentCombos.has([rm, rw, bm, bw].sort().join('|'))) score++;
+      }
+
+      if (!best || score < best.score) {
+        best = { pairsRed, pairsBlue, leftoverRed, leftoverBlue, score };
+        if (score === 0) break;
+      }
+    }
+
+    const { pairsRed, pairsBlue, leftoverRed, leftoverBlue } = best!;
+    const numMatches = Math.min(pairsRed.length, pairsBlue.length);
+    const matches: TeamDoublesMatch[] = [];
+    for (let i = 0; i < numMatches; i++) {
+      const [rm, rw] = pairsRed[i];
+      const [bm, bw] = pairsBlue[i];
+      matches.push({ id: `TD-R${r}-M${i}`, side1: [rm, rw], side2: [bm, bw] });
+      usedPartnerCombos.add(partnerKey(rm, rw));
+      usedPartnerCombos.add(partnerKey(bm, bw));
+      usedOpponentCombos.add([rm, rw, bm, bw].sort().join('|'));
+    }
+    if (leftoverRed.length === 1 && leftoverBlue.length === 1) {
+      matches.push({ id: `TD-R${r}-S0`, side1: [leftoverRed[0]], side2: [leftoverBlue[0]] });
+    }
+    rounds.push(matches);
+  }
+
+  return rounds;
+}
+
+export function computeTeamDoublesScore(rounds: TeamDoublesMatch[][], sets: SetsMap): { red: number; blue: number } {
+  let red = 0;
+  let blue = 0;
+  rounds.forEach((round) =>
+    round.forEach((m) => {
+      const r = evalMatch(sets[m.id]);
+      if (r.winner === 'p1') red++;
+      else if (r.winner === 'p2') blue++;
+    })
+  );
+  return { red, blue };
 }
