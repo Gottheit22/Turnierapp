@@ -5,6 +5,7 @@ export type SetScore = { a: string; b: string };
 export type MatchSets = [SetScore, SetScore, SetScore, SetScore];
 export type SetsMap = Record<string, MatchSets>;
 
+
 export function emptySet(): SetScore {
   return { a: '', b: '' };
 }
