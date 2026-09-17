@@ -175,6 +175,24 @@ body {
   color: var(--clay-dark);
   font-weight: 600;
 }
+.withdraw-btn {
+  margin-left: 6px;
+  background: transparent;
+  border: 1px solid #d8d2c2;
+  color: var(--ink-soft);
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.withdraw-btn:hover {
+  border-color: var(--clay);
+  color: var(--clay-dark);
+}
 
 .td-scoreboard {
   display: flex;
