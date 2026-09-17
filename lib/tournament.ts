@@ -5,7 +5,6 @@ export type SetScore = { a: string; b: string };
 export type MatchSets = [SetScore, SetScore, SetScore, SetScore];
 export type SetsMap = Record<string, MatchSets>;
 
-
 export function emptySet(): SetScore {
   return { a: '', b: '' };
 }
@@ -46,6 +45,14 @@ export function evalMatch(sets: MatchSets | undefined): EvalResult {
     // für die Tabelle, unabhängig vom tatsächlich eingetragenen Original-Ergebnis.
     if (meta.a === 'INJ') return { aSets: 0, bSets: 2, winner: 'p2', injuryOverride: 'p1' };
     if (meta.b === 'INJ') return { aSets: 2, bSets: 0, winner: 'p1', injuryOverride: 'p2' };
+  }
+
+  // Abwärtskompatibilität: eine ältere Version dieses Tools speicherte den
+  // W.O.-Marker direkt in Satz 1 statt im Meta-Slot (Index 3).
+  const legacy = arr[0];
+  if (legacy) {
+    if (legacy.a === 'WO') return { aSets: 0, bSets: 2, winner: 'p2', walkover: 'p1' };
+    if (legacy.b === 'WO') return { aSets: 2, bSets: 0, winner: 'p1', walkover: 'p2' };
   }
 
   return evalRealSets(realSets(arr));
