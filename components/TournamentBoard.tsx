@@ -14,6 +14,7 @@ import {
   SimpleMatch,
   SwissConfig,
   emptyMatchSets,
+  emptySet,
   evalMatch,
   groupStandings,
   groupComplete,
@@ -148,7 +149,16 @@ export default function TournamentBoard() {
     const tournamentId = selected.id;
     setLocalSets((prev) => {
       const current = prev[matchId] || emptyMatchSets();
-      const nextMatchSets = current.map((s, i) => (i === setIdx ? { ...s, [player]: value } : s)) as SetsMap[string];
+      // Ältere, bereits gespeicherte Matches haben u.U. nur 3 statt 4 Felder
+      // (der 4. ist der neue, versteckte Meta-Slot) - vor dem Schreiben auf
+      // 4 Felder auffüllen, sonst geht ein Schreibversuch auf Index 3 ins Leere.
+      const padded: SetsMap[string] = [
+        current[0] || emptySet(),
+        current[1] || emptySet(),
+        current[2] || emptySet(),
+        current[3] || emptySet()
+      ];
+      const nextMatchSets = padded.map((s, i) => (i === setIdx ? { ...s, [player]: value } : s)) as SetsMap[string];
       const next = { ...prev, [matchId]: nextMatchSets };
       scheduleSave(tournamentId, next);
       return next;
