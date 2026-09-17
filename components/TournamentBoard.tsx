@@ -978,38 +978,16 @@ function MatchRow(props: {
 
   const displayValue = (v: string) => (v === 'WO' || v === 'INJ' ? '' : v);
 
-  const statusLine = r.walkover ? (
-    <div className="match-status-line">
-      <span>
-        Sieg durch Aufgabe für <strong>{r.winner === 'p1' ? p1 : p2}</strong> (Ergebnis bleibt stehen)
-      </span>
-      {!readOnly && (
-        <button type="button" className="wo-undo" onClick={clearMeta}>
-          Zurücksetzen
-        </button>
-      )}
-    </div>
-  ) : r.injuryOverride ? (
-    <div className="match-status-line inj">
-      <span>
-        Nachträglich als Verletzungsrückzug gewertet – zählt 0:6 0:6 für <strong>{r.injuryOverride === 'p1' ? p1 : p2}</strong>{' '}
-        (Original-Ergebnis bleibt sichtbar)
-      </span>
-      {!readOnly && (
-        <button type="button" className="wo-undo" onClick={clearMeta}>
-          Zurücksetzen
-        </button>
-      )}
-    </div>
-  ) : null;
+  const hasOverride = !!r.walkover || !!r.injuryOverride;
+  const p1IsWO = r.walkover === 'p1' || r.injuryOverride === 'p1';
+  const p2IsWO = r.walkover === 'p2' || r.injuryOverride === 'p2';
 
   // "Nachträglich verletzungsbedingt werten" nur anbieten, wenn das Match
   // bereits regulär entschieden ist (kein Override aktiv, echter Sieger da).
-  const canOfferInjuryOverride = !readOnly && !r.walkover && !r.injuryOverride && r.winner !== null;
+  const canOfferInjuryOverride = !readOnly && !hasOverride && r.winner !== null;
 
   return (
     <div className="scoreboard">
-      {statusLine}
       <div className="scoreboard-labels">
         <span></span>
         <span>S1</span>
@@ -1019,7 +997,17 @@ function MatchRow(props: {
       <div className={'scoreboard-row' + (r.winner === 'p1' ? ' winner' : '')}>
         <div className="scoreboard-name">
           {p1}
-          {!readOnly && !r.walkover && !r.injuryOverride && (
+          {p1IsWO && (
+            <span className="wo-tag">
+              (w.o.)
+              {!readOnly && (
+                <button type="button" className="wo-tag-undo" title="W.O. zurücknehmen" onClick={clearMeta}>
+                  ×
+                </button>
+              )}
+            </span>
+          )}
+          {!readOnly && !hasOverride && (
             <button type="button" className="wo-btn" title="Diese Person tritt nicht mehr an / gibt auf – Ergebnis bleibt stehen" onClick={() => setMeta('WO', 'a')}>
               Aufgabe
             </button>
@@ -1041,7 +1029,17 @@ function MatchRow(props: {
       <div className={'scoreboard-row' + (r.winner === 'p2' ? ' winner' : '')}>
         <div className="scoreboard-name">
           {p2}
-          {!readOnly && !r.walkover && !r.injuryOverride && (
+          {p2IsWO && (
+            <span className="wo-tag">
+              (w.o.)
+              {!readOnly && (
+                <button type="button" className="wo-tag-undo" title="W.O. zurücknehmen" onClick={clearMeta}>
+                  ×
+                </button>
+              )}
+            </span>
+          )}
+          {!readOnly && !hasOverride && (
             <button type="button" className="wo-btn" title="Diese Person tritt nicht mehr an / gibt auf – Ergebnis bleibt stehen" onClick={() => setMeta('WO', 'b')}>
               Aufgabe
             </button>
@@ -1062,12 +1060,8 @@ function MatchRow(props: {
       </div>
       {canOfferInjuryOverride && (
         <div className="match-status-line muted">
-          <button
-            type="button"
-            className="wo-undo"
-            onClick={() => setMeta('INJ', r.winner === 'p1' ? 'a' : 'b')}
-          >
-            Nachträglich als Verletzungsrückzug werten (0:6 0:6 für {r.winner === 'p1' ? p2 : p1})
+          <button type="button" className="wo-undo" onClick={() => setMeta('INJ', r.winner === 'p1' ? 'a' : 'b')}>
+            Nachträglich als Verletzungsrückzug werten (0:6 0:6, Original-Ergebnis bleibt sichtbar)
           </button>
         </div>
       )}
