@@ -14,12 +14,24 @@ export function getMatchSets(sets: SetsMap, id: string): MatchSets {
   return sets[id] || emptyMatchSets();
 }
 
-export type EvalResult = { aSets: number; bSets: number; winner: 'p1' | 'p2' | null };
+export type EvalResult = { aSets: number; bSets: number; winner: 'p1' | 'p2' | null; walkover?: 'p1' | 'p2' };
 
 export function evalMatch(sets: MatchSets | undefined): EvalResult {
+  const arr = sets || emptyMatchSets();
+
+  // W.O. (Nichtantreten/Aufgabe): wird im ersten Satz als Sentinel-Wert "WO"
+  // in der Spalte der aufgebenden Person gespeichert. Wird das erkannt,
+  // gewinnt automatisch die andere Seite, unabhängig von eventuell
+  // eingetragenen Zahlen in anderen Sätzen.
+  const first = arr[0];
+  if (first) {
+    if (first.a === 'WO') return { aSets: 0, bSets: 2, winner: 'p2', walkover: 'p1' };
+    if (first.b === 'WO') return { aSets: 2, bSets: 0, winner: 'p1', walkover: 'p2' };
+  }
+
   let aSets = 0;
   let bSets = 0;
-  (sets || emptyMatchSets()).forEach((s) => {
+  arr.forEach((s) => {
     if (s.a !== '' && s.b !== '') {
       const av = Number(s.a);
       const bv = Number(s.b);
