@@ -956,9 +956,17 @@ function MatchRow(props: {
     onSetChange(matchId, 3, 'b', side === 'b' ? value : '');
   };
   const clearMeta = () => {
+    // Neues Schema (Index 3) immer löschen.
     onSetChange(matchId, 3, 'a', '');
     onSetChange(matchId, 3, 'b', '');
+    // Abwärtskompatibilität: falls noch der alte Marker in Satz 1 steht, den auch entfernen.
+    if (safeSets[0]?.a === 'WO' || safeSets[0]?.b === 'WO') {
+      onSetChange(matchId, 0, 'a', '');
+      onSetChange(matchId, 0, 'b', '');
+    }
   };
+
+  const displayValue = (v: string) => (v === 'WO' || v === 'INJ' ? '' : v);
 
   const statusLine = r.walkover ? (
     <div className="match-status-line">
@@ -1013,7 +1021,7 @@ function MatchRow(props: {
               type="number"
               min={0}
               max={20}
-              value={safeSets[idx].a}
+              value={displayValue(safeSets[idx].a)}
               disabled={readOnly}
               onChange={(e) => onSetChange(matchId, idx, 'a', e.target.value)}
             />
@@ -1035,7 +1043,7 @@ function MatchRow(props: {
               type="number"
               min={0}
               max={20}
-              value={safeSets[idx].b}
+              value={displayValue(safeSets[idx].b)}
               disabled={readOnly}
               onChange={(e) => onSetChange(matchId, idx, 'b', e.target.value)}
             />
