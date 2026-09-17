@@ -948,6 +948,42 @@ function MatchRow(props: {
   const { matchId, p1, p2, sets, onSetChange, readOnly } = props;
   const safeSets = sets || emptyMatchSets();
   const r = evalMatch(safeSets as any);
+
+  const setWalkover = (loserSide: 'a' | 'b') => {
+    onSetChange(matchId, 0, 'a', loserSide === 'a' ? 'WO' : '');
+    onSetChange(matchId, 0, 'b', loserSide === 'b' ? 'WO' : '');
+    onSetChange(matchId, 1, 'a', '');
+    onSetChange(matchId, 1, 'b', '');
+    onSetChange(matchId, 2, 'a', '');
+    onSetChange(matchId, 2, 'b', '');
+  };
+
+  const clearWalkover = () => {
+    [0, 1, 2].forEach((idx) => {
+      onSetChange(matchId, idx, 'a', '');
+      onSetChange(matchId, idx, 'b', '');
+    });
+  };
+
+  if (r.walkover) {
+    const winnerName = r.winner === 'p1' ? p1 : p2;
+    const loserName = r.walkover === 'p1' ? p1 : p2;
+    return (
+      <div className="scoreboard">
+        <div className="wo-banner">
+          <span>
+            <strong>{winnerName}</strong> gewinnt kampflos (W.O. gegen {loserName})
+          </span>
+          {!readOnly && (
+            <button type="button" className="wo-undo" onClick={clearWalkover}>
+              Zurücksetzen
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="scoreboard">
       <div className="scoreboard-labels">
@@ -957,7 +993,14 @@ function MatchRow(props: {
         <span>S3</span>
       </div>
       <div className={'scoreboard-row' + (r.winner === 'p1' ? ' winner' : '')}>
-        <div className="scoreboard-name">{p1}</div>
+        <div className="scoreboard-name">
+          {p1}
+          {!readOnly && (
+            <button type="button" className="wo-btn" title="Diese Person tritt nicht an / gibt auf" onClick={() => setWalkover('a')}>
+              W.O.
+            </button>
+          )}
+        </div>
         {[0, 1, 2].map((idx) => (
           <div className="scoreboard-cell" key={idx}>
             <input
@@ -972,7 +1015,14 @@ function MatchRow(props: {
         ))}
       </div>
       <div className={'scoreboard-row' + (r.winner === 'p2' ? ' winner' : '')}>
-        <div className="scoreboard-name">{p2}</div>
+        <div className="scoreboard-name">
+          {p2}
+          {!readOnly && (
+            <button type="button" className="wo-btn" title="Diese Person tritt nicht an / gibt auf" onClick={() => setWalkover('b')}>
+              W.O.
+            </button>
+          )}
+        </div>
         {[0, 1, 2].map((idx) => (
           <div className="scoreboard-cell" key={idx}>
             <input
