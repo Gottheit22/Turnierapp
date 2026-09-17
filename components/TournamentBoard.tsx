@@ -1038,7 +1038,7 @@ function MatchRow(props: {
         <span>S2</span>
         <span>S3</span>
       </div>
-      <div className={'scoreboard-row' + (r.winner === 'p1' ? ' winner' : '')}>
+      <div className={'scoreboard-row' + (r.winner === 'p1' ? ' winner' : r.winner === 'p2' ? ' loser' : '')}>
         <div className="scoreboard-name">
           {p1}
           {p1IsWO && (
@@ -1070,7 +1070,7 @@ function MatchRow(props: {
           </div>
         ))}
       </div>
-      <div className={'scoreboard-row' + (r.winner === 'p2' ? ' winner' : '')}>
+      <div className={'scoreboard-row' + (r.winner === 'p2' ? ' winner' : r.winner === 'p1' ? ' loser' : '')}>
         <div className="scoreboard-name">
           {p2}
           {p2IsWO && (
