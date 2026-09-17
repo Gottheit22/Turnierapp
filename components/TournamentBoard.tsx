@@ -54,6 +54,7 @@ type TournamentDoc = {
   teamDoublesBlue: GenderGroups;
   teamDoublesRounds: TeamDoublesMatch[][];
   teamDoublesScoringMode: TeamDoublesScoringMode;
+  withdrawnPlayers: string[];
   sets: SetsMap;
   status: 'active' | 'archived';
   createdAt: number;
@@ -103,6 +104,7 @@ export default function TournamentBoard() {
             teamDoublesBlue: data.teamDoublesBlue || { men: [], women: [] },
             teamDoublesRounds: (data.teamDoublesRounds || []).map((r: any) => r?.matches || []),
             teamDoublesScoringMode: data.teamDoublesScoringMode === 'games' ? 'games' : 'wins',
+            withdrawnPlayers: data.withdrawnPlayers || [],
             sets: data.sets || {},
             status: data.status === 'archived' ? 'archived' : 'active',
             createdAt: data.createdAt || 0
@@ -218,12 +220,24 @@ export default function TournamentBoard() {
       teamDoublesBlue,
       teamDoublesRounds: teamDoublesRounds.map((round) => ({ matches: round })),
       teamDoublesScoringMode: scoringMode || 'wins',
+      withdrawnPlayers: [],
       sets: {},
       status: 'active',
       createdAt: Date.now()
     });
     setSelectedId(ref.id);
     setShowCreateForm(false);
+  };
+
+  const handleToggleWithdrawn = async (tournamentId: string, currentList: string[], playerName: string) => {
+    const next = currentList.includes(playerName)
+      ? currentList.filter((n) => n !== playerName)
+      : [...currentList, playerName];
+    try {
+      await setDoc(tournamentDocRef(tournamentId), { withdrawnPlayers: next }, { merge: true });
+    } catch (e) {
+      setStatus('error');
+    }
   };
 
   const handleNextSwissRound = async () => {
@@ -325,6 +339,7 @@ export default function TournamentBoard() {
           readOnly={!!readOnly}
           user={user}
           onNextSwissRound={handleNextSwissRound}
+          onToggleWithdrawn={(playerName) => handleToggleWithdrawn(selected.id, selected.withdrawnPlayers, playerName)}
         />
       )}
     </div>
@@ -405,8 +420,9 @@ function TournamentView(props: {
   readOnly: boolean;
   user: User | null;
   onNextSwissRound: () => void;
+  onToggleWithdrawn: (playerName: string) => void;
 }) {
-  const { tournament, sets, onSetChange, readOnly, user, onNextSwissRound } = props;
+  const { tournament, sets, onSetChange, readOnly, user, onNextSwissRound, onToggleWithdrawn } = props;
 
   if (tournament.format === 'double-elim') {
     return (
@@ -451,7 +467,14 @@ function TournamentView(props: {
   return (
     <>
       {readOnly && <p className="archived-note">Dieses Turnier ist archiviert und wird nur noch angezeigt, nicht mehr bearbeitet.</p>}
-      <GroupsKOView tournament={tournament} sets={sets} onSetChange={onSetChange} readOnly={readOnly} />
+      <GroupsKOView
+        tournament={tournament}
+        sets={sets}
+        onSetChange={onSetChange}
+        readOnly={readOnly}
+        user={user}
+        onToggleWithdrawn={onToggleWithdrawn}
+      />
     </>
   );
 }
@@ -533,11 +556,14 @@ function GroupsKOView(props: {
   sets: SetsMap;
   onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
   readOnly: boolean;
+  user: User | null;
+  onToggleWithdrawn: (playerName: string) => void;
 }) {
-  const { tournament, sets, onSetChange, readOnly } = props;
+  const { tournament, sets, onSetChange, readOnly, user, onToggleWithdrawn } = props;
   const groups = tournament.groups;
+  const withdrawn = tournament.withdrawnPlayers || [];
 
-  const qualifierOrder = buildQualifierOrder(groups, sets);
+  const qualifierOrder = buildQualifierOrder(groups, sets, withdrawn);
   const bracketRounds = qualifierOrder ? buildBracket(qualifierOrder, sets) : [];
   const finalRound = bracketRounds[bracketRounds.length - 1];
   const finalMatch = finalRound?.[0];
@@ -564,6 +590,9 @@ function GroupsKOView(props: {
             onSetChange={onSetChange}
             readOnly={readOnly}
             onlyGroup={groups.length === 1}
+            withdrawn={withdrawn}
+            isAdmin={!readOnly && !!user}
+            onToggleWithdrawn={onToggleWithdrawn}
           />
         ))}
       </div>
@@ -887,10 +916,13 @@ function GroupPanel(props: {
   onSetChange: (matchId: string, setIdx: number, player: 'a' | 'b', value: string) => void;
   readOnly: boolean;
   onlyGroup: boolean;
+  withdrawn: string[];
+  isAdmin: boolean;
+  onToggleWithdrawn: (playerName: string) => void;
 }) {
-  const { group, sets, onSetChange, readOnly, onlyGroup } = props;
-  const standings = groupStandings(group.matches, sets, group.players);
-  const complete = groupComplete(group.matches, sets);
+  const { group, sets, onSetChange, readOnly, onlyGroup, withdrawn, isAdmin, onToggleWithdrawn } = props;
+  const standings = groupStandings(group.matches, sets, group.players, withdrawn);
+  const complete = groupComplete(group.matches, sets, withdrawn);
 
   return (
     <div className="group-panel">
@@ -911,11 +943,22 @@ function GroupPanel(props: {
         </thead>
         <tbody>
           {standings.map((row, idx) => (
-            <tr key={row.name} className={idx === 0 ? 'rank-1' : idx === 1 ? 'rank-2' : ''}>
-              <td>{idx + 1}</td>
+            <tr key={row.name} className={row.withdrawn ? '' : idx === 0 ? 'rank-1' : idx === 1 ? 'rank-2' : ''}>
+              <td>{row.withdrawn ? '–' : idx + 1}</td>
               <td>
                 {row.name}
-                {idx < 2 && <span className="badge">KO</span>}
+                {!row.withdrawn && idx < 2 && <span className="badge">KO</span>}
+                {row.withdrawn && <span className="status-out">(w.o.)</span>}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="withdraw-btn"
+                    title={row.withdrawn ? 'Rückzug aufheben' : 'Als verletzungsbedingt zurückgezogen markieren'}
+                    onClick={() => onToggleWithdrawn(row.name)}
+                  >
+                    {row.withdrawn ? 'zurücknehmen' : 'w.o.'}
+                  </button>
+                )}
               </td>
               <td>{row.played}</td>
               <td className="pts">{row.points}</td>
@@ -930,6 +973,11 @@ function GroupPanel(props: {
         </tbody>
       </table>
       {!complete && <p className="provisional-note">Tabelle ist vorläufig, solange noch Spiele offen sind.</p>}
+      {withdrawn.some((n) => group.players.includes(n)) && (
+        <p className="provisional-note">
+          Zurückgezogene Spieler:innen zählen mit keinem ihrer Spiele (weder gespielt noch offen) in der Tabelle.
+        </p>
+      )}
       <div className="match-list">
         {group.matches.map((m) => (
           <MatchRow
@@ -961,7 +1009,7 @@ function MatchRow(props: {
 
   // Meta-Slot (Index 3) setzen/löschen, ohne die echten Satz-Felder (0-2)
   // anzutasten – die bleiben immer exakt so stehen, wie eingetragen.
-  const setMeta = (value: 'WO' | 'INJ', side: 'a' | 'b') => {
+  const setMeta = (value: 'WO', side: 'a' | 'b') => {
     onSetChange(matchId, 3, 'a', side === 'a' ? value : '');
     onSetChange(matchId, 3, 'b', side === 'b' ? value : '');
   };
@@ -978,13 +1026,9 @@ function MatchRow(props: {
 
   const displayValue = (v: string) => (v === 'WO' || v === 'INJ' ? '' : v);
 
-  const hasOverride = !!r.walkover || !!r.injuryOverride;
-  const p1IsWO = r.walkover === 'p1' || r.injuryOverride === 'p1';
-  const p2IsWO = r.walkover === 'p2' || r.injuryOverride === 'p2';
-
-  // "Nachträglich verletzungsbedingt werten" nur anbieten, wenn das Match
-  // bereits regulär entschieden ist (kein Override aktiv, echter Sieger da).
-  const canOfferInjuryOverride = !readOnly && !hasOverride && r.winner !== null;
+  const hasOverride = !!r.walkover;
+  const p1IsWO = r.walkover === 'p1';
+  const p2IsWO = r.walkover === 'p2';
 
   return (
     <div className="scoreboard">
@@ -1058,13 +1102,6 @@ function MatchRow(props: {
           </div>
         ))}
       </div>
-      {canOfferInjuryOverride && (
-        <div className="match-status-line muted">
-          <button type="button" className="wo-undo" onClick={() => setMeta('INJ', r.winner === 'p1' ? 'a' : 'b')}>
-            Nachträglich als Verletzungsrückzug werten (0:6 0:6, Original-Ergebnis bleibt sichtbar)
-          </button>
-        </div>
-      )}
     </div>
   );
 }
