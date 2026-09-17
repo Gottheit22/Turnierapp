@@ -9,6 +9,7 @@ export function emptySet(): SetScore {
   return { a: '', b: '' };
 }
 
+
 export function emptyMatchSets(): MatchSets {
   return [emptySet(), emptySet(), emptySet(), emptySet()];
 }
