@@ -23,8 +23,6 @@ export type EvalResult = {
   winner: 'p1' | 'p2' | null;
   /** Sieg durch Aufgabe/Nichtantreten - Original-Sätze bleiben unverändert stehen. */
   walkover?: 'p1' | 'p2';
-  /** Nachträglich als Verletzungsrückzug gewertet - zählt 0:6/0:6, Original-Sätze bleiben trotzdem sichtbar. */
-  injuryOverride?: 'p1' | 'p2';
 };
 
 function realSets(arr: MatchSets): [SetScore, SetScore, SetScore] {
@@ -40,11 +38,6 @@ export function evalMatch(sets: MatchSets | undefined): EvalResult {
     // die Sätze 1-3 bleiben exakt so stehen, wie sie eingetragen wurden.
     if (meta.a === 'WO') return { ...evalRealSets(realSets(arr)), winner: 'p2', walkover: 'p1' };
     if (meta.b === 'WO') return { ...evalRealSets(realSets(arr)), winner: 'p1', walkover: 'p2' };
-
-    // Nachträglich als Verletzungsrückzug gewertet: zählt als klares 0:6/0:6
-    // für die Tabelle, unabhängig vom tatsächlich eingetragenen Original-Ergebnis.
-    if (meta.a === 'INJ') return { aSets: 0, bSets: 2, winner: 'p2', injuryOverride: 'p1' };
-    if (meta.b === 'INJ') return { aSets: 2, bSets: 0, winner: 'p1', injuryOverride: 'p2' };
   }
 
   // Abwärtskompatibilität: eine ältere Version dieses Tools speicherte den
@@ -137,14 +130,35 @@ export type StandingRow = {
   setsLost: number;
   gamesWon: number;
   gamesLost: number;
+  withdrawn: boolean;
 };
 
-export function groupStandings(matches: SimpleMatch[], sets: SetsMap, players: string[]): StandingRow[] {
+/**
+ * @param withdrawn Namen von Spieler:innen, die verletzungsbedingt aus dem
+ * Turnier zurückgezogen wurden. Deren Spiele (gespielt oder nicht) fallen
+ * komplett aus der Wertung - weder als Sieg noch als Niederlage.
+ */
+export function groupStandings(
+  matches: SimpleMatch[],
+  sets: SetsMap,
+  players: string[],
+  withdrawn: string[] = []
+): StandingRow[] {
   const stat: Record<string, StandingRow> = {};
   players.forEach((p) => {
-    stat[p] = { name: p, points: 0, played: 0, setsWon: 0, setsLost: 0, gamesWon: 0, gamesLost: 0 };
+    stat[p] = {
+      name: p,
+      points: 0,
+      played: 0,
+      setsWon: 0,
+      setsLost: 0,
+      gamesWon: 0,
+      gamesLost: 0,
+      withdrawn: withdrawn.includes(p)
+    };
   });
   matches.forEach((m) => {
+    if (withdrawn.includes(m.p1) || withdrawn.includes(m.p2)) return;
     const r = evalMatch(sets[m.id]);
     stat[m.p1].setsWon += r.aSets;
     stat[m.p1].setsLost += r.bSets;
@@ -165,6 +179,7 @@ export function groupStandings(matches: SimpleMatch[], sets: SetsMap, players: s
     }
   });
   return Object.values(stat).sort((x, y) => {
+    if (x.withdrawn !== y.withdrawn) return x.withdrawn ? 1 : -1;
     if (y.points !== x.points) return y.points - x.points;
     const dx = x.setsWon - x.setsLost;
     const dy = y.setsWon - y.setsLost;
@@ -173,8 +188,10 @@ export function groupStandings(matches: SimpleMatch[], sets: SetsMap, players: s
   });
 }
 
-export function groupComplete(matches: SimpleMatch[], sets: SetsMap): boolean {
-  return matches.every((m) => evalMatch(sets[m.id]).winner !== null);
+export function groupComplete(matches: SimpleMatch[], sets: SetsMap, withdrawn: string[] = []): boolean {
+  return matches.every(
+    (m) => withdrawn.includes(m.p1) || withdrawn.includes(m.p2) || evalMatch(sets[m.id]).winner !== null
+  );
 }
 
 /**
@@ -183,10 +200,10 @@ export function groupComplete(matches: SimpleMatch[], sets: SetsMap): boolean {
  * zwei Spielerinnen aus derselben Gruppe nicht sofort wieder aufeinandertreffen.
  * Gibt null zurück, solange nicht alle Gruppen fertig gespielt sind.
  */
-export function buildQualifierOrder(groups: GroupInfo[], sets: SetsMap): string[] | null {
-  const allComplete = groups.every((g) => groupComplete(g.matches, sets));
+export function buildQualifierOrder(groups: GroupInfo[], sets: SetsMap, withdrawn: string[] = []): string[] | null {
+  const allComplete = groups.every((g) => groupComplete(g.matches, sets, withdrawn));
   if (!allComplete) return null;
-  const standingsPerGroup = groups.map((g) => groupStandings(g.matches, sets, g.players));
+  const standingsPerGroup = groups.map((g) => groupStandings(g.matches, sets, g.players, withdrawn).filter((s) => !s.withdrawn));
   if (standingsPerGroup.some((s) => s.length < 2)) return null;
   const g = groups.length;
   const winners = standingsPerGroup.map((s) => s[0].name);
@@ -704,12 +721,6 @@ export type TeamDoublesScoringMode = 'wins' | 'games';
  */
 export function matchGames(sets: MatchSets | undefined): { a: number; b: number } {
   const arr = sets || emptyMatchSets();
-  const meta = arr[3];
-
-  // Nachträglich verletzungsbedingt gewertet: zählt fix als 6:0 6:0 (12:0
-  // Spiele), unabhängig vom tatsächlich eingetragenen Original-Ergebnis.
-  if (meta?.a === 'INJ') return { a: 0, b: 12 };
-  if (meta?.b === 'INJ') return { a: 12, b: 0 };
 
   let a = 0;
   let b = 0;
