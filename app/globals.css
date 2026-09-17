@@ -445,6 +445,26 @@ h2.section-title {
 .scoreboard-row.winner .scoreboard-name {
   background: var(--clay);
 }
+.scoreboard-row.loser .scoreboard-name {
+  background: #cbd0cc;
+  color: #6b756f;
+}
+.scoreboard-row.loser .scoreboard-cell {
+  background: #fafaf8;
+}
+.scoreboard-row.loser .scoreboard-cell input {
+  color: #a3aba5;
+  font-weight: 600;
+}
+.scoreboard-row.loser .wo-tag {
+  color: #8a5a1d;
+}
+.scoreboard-row.loser .wo-btn,
+.scoreboard-row.loser .wo-tag-undo {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.2);
+  color: #6b756f;
+}
 .scoreboard-cell {
   background: #fff;
   display: flex;
