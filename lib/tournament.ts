@@ -1,5 +1,8 @@
 export type SetScore = { a: string; b: string };
-export type MatchSets = [SetScore, SetScore, SetScore];
+// 4 Elemente: [Satz1, Satz2, Satz3, Meta]. Der 4. Eintrag ist kein echter
+// Satz, sondern ein versteckter Meta-Slot für Sieger-Overrides (W.O. /
+// nachträgliche Verletzungswertung) - wird nie als Eingabefeld angezeigt.
+export type MatchSets = [SetScore, SetScore, SetScore, SetScore];
 export type SetsMap = Record<string, MatchSets>;
 
 export function emptySet(): SetScore {
@@ -7,31 +10,50 @@ export function emptySet(): SetScore {
 }
 
 export function emptyMatchSets(): MatchSets {
-  return [emptySet(), emptySet(), emptySet()];
+  return [emptySet(), emptySet(), emptySet(), emptySet()];
 }
 
 export function getMatchSets(sets: SetsMap, id: string): MatchSets {
   return sets[id] || emptyMatchSets();
 }
 
-export type EvalResult = { aSets: number; bSets: number; winner: 'p1' | 'p2' | null; walkover?: 'p1' | 'p2' };
+export type EvalResult = {
+  aSets: number;
+  bSets: number;
+  winner: 'p1' | 'p2' | null;
+  /** Sieg durch Aufgabe/Nichtantreten - Original-Sätze bleiben unverändert stehen. */
+  walkover?: 'p1' | 'p2';
+  /** Nachträglich als Verletzungsrückzug gewertet - zählt 0:6/0:6, Original-Sätze bleiben trotzdem sichtbar. */
+  injuryOverride?: 'p1' | 'p2';
+};
+
+function realSets(arr: MatchSets): [SetScore, SetScore, SetScore] {
+  return [arr[0], arr[1], arr[2]];
+}
 
 export function evalMatch(sets: MatchSets | undefined): EvalResult {
   const arr = sets || emptyMatchSets();
+  const meta = arr[3];
 
-  // W.O. (Nichtantreten/Aufgabe): wird im ersten Satz als Sentinel-Wert "WO"
-  // in der Spalte der aufgebenden Person gespeichert. Wird das erkannt,
-  // gewinnt automatisch die andere Seite, unabhängig von eventuell
-  // eingetragenen Zahlen in anderen Sätzen.
-  const first = arr[0];
-  if (first) {
-    if (first.a === 'WO') return { aSets: 0, bSets: 2, winner: 'p2', walkover: 'p1' };
-    if (first.b === 'WO') return { aSets: 2, bSets: 0, winner: 'p1', walkover: 'p2' };
+  if (meta) {
+    // "Aufgabe" (z. B. Rückzug mitten im Match bei 5:3): Sieger wird erzwungen,
+    // die Sätze 1-3 bleiben exakt so stehen, wie sie eingetragen wurden.
+    if (meta.a === 'WO') return { ...evalRealSets(realSets(arr)), winner: 'p2', walkover: 'p1' };
+    if (meta.b === 'WO') return { ...evalRealSets(realSets(arr)), winner: 'p1', walkover: 'p2' };
+
+    // Nachträglich als Verletzungsrückzug gewertet: zählt als klares 0:6/0:6
+    // für die Tabelle, unabhängig vom tatsächlich eingetragenen Original-Ergebnis.
+    if (meta.a === 'INJ') return { aSets: 0, bSets: 2, winner: 'p2', injuryOverride: 'p1' };
+    if (meta.b === 'INJ') return { aSets: 2, bSets: 0, winner: 'p1', injuryOverride: 'p2' };
   }
 
+  return evalRealSets(realSets(arr));
+}
+
+function evalRealSets(sets: [SetScore, SetScore, SetScore]): EvalResult {
   let aSets = 0;
   let bSets = 0;
-  arr.forEach((s) => {
+  sets.forEach((s) => {
     if (s.a !== '' && s.b !== '') {
       const av = Number(s.a);
       const bv = Number(s.b);
@@ -121,31 +143,11 @@ export function groupStandings(matches: SimpleMatch[], sets: SetsMap, players: s
     stat[m.p2].setsWon += r.bSets;
     stat[m.p2].setsLost += r.aSets;
 
-    const matchSets = sets[m.id] || emptyMatchSets();
-    matchSets.forEach((s, idx) => {
-      if (s.a !== '' && s.b !== '') {
-        const av = Number(s.a);
-        const bv = Number(s.b);
-        if (!isNaN(av) && !isNaN(bv) && av !== bv) {
-          if (idx === 2) {
-            // Match-Tiebreak (3. Satz): zählt nur als 1:0 Spiele für die Siegerin,
-            // 0:1 für die Verliererin – nicht die tatsächlichen Tiebreak-Punkte.
-            if (av > bv) {
-              stat[m.p1].gamesWon += 1;
-              stat[m.p2].gamesLost += 1;
-            } else {
-              stat[m.p2].gamesWon += 1;
-              stat[m.p1].gamesLost += 1;
-            }
-          } else {
-            stat[m.p1].gamesWon += av;
-            stat[m.p1].gamesLost += bv;
-            stat[m.p2].gamesWon += bv;
-            stat[m.p2].gamesLost += av;
-          }
-        }
-      }
-    });
+    const g = matchGames(sets[m.id]);
+    stat[m.p1].gamesWon += g.a;
+    stat[m.p1].gamesLost += g.b;
+    stat[m.p2].gamesWon += g.b;
+    stat[m.p2].gamesLost += g.a;
 
     if (r.winner) {
       stat[m.p1].played++;
@@ -693,9 +695,17 @@ export type TeamDoublesScoringMode = 'wins' | 'games';
  * Siegerin des Tiebreaks – nicht die tatsächlichen Tiebreak-Punkte.
  */
 export function matchGames(sets: MatchSets | undefined): { a: number; b: number } {
+  const arr = sets || emptyMatchSets();
+  const meta = arr[3];
+
+  // Nachträglich verletzungsbedingt gewertet: zählt fix als 6:0 6:0 (12:0
+  // Spiele), unabhängig vom tatsächlich eingetragenen Original-Ergebnis.
+  if (meta?.a === 'INJ') return { a: 0, b: 12 };
+  if (meta?.b === 'INJ') return { a: 12, b: 0 };
+
   let a = 0;
   let b = 0;
-  (sets || emptyMatchSets()).forEach((s, idx) => {
+  [arr[0], arr[1], arr[2]].forEach((s, idx) => {
     if (s.a !== '' && s.b !== '') {
       const av = Number(s.a);
       const bv = Number(s.b);
