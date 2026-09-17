@@ -9,7 +9,6 @@ export function emptySet(): SetScore {
   return { a: '', b: '' };
 }
 
-
 export function emptyMatchSets(): MatchSets {
   return [emptySet(), emptySet(), emptySet(), emptySet()];
 }
@@ -179,14 +178,58 @@ export function groupStandings(
       else stat[m.p2].points += 2;
     }
   });
-  return Object.values(stat).sort((x, y) => {
-    if (x.withdrawn !== y.withdrawn) return x.withdrawn ? 1 : -1;
-    if (y.points !== x.points) return y.points - x.points;
+  return sortStandings(Object.values(stat), matches, sets);
+}
+
+/**
+ * Sortiert die Tabelle: Punkte, dann bei GENAU 2 punktgleichen Personen der
+ * direkte Vergleich (wer hat gegen wen gewonnen); bei 3 oder mehr
+ * punktgleichen Personen (oder wenn der direkte Vergleich nicht ermittelbar
+ * ist) stattdessen Satzdifferenz, dann Anzahl gewonnener Sätze. Zurückgezogene
+ * Spieler:innen landen immer ganz am Ende.
+ */
+function sortStandings(rows: StandingRow[], matches: SimpleMatch[], sets: SetsMap): StandingRow[] {
+  function headToHead(aName: string, bName: string): 'a' | 'b' | null {
+    const m = matches.find((mm) => (mm.p1 === aName && mm.p2 === bName) || (mm.p1 === bName && mm.p2 === aName));
+    if (!m) return null;
+    const r = evalMatch(sets[m.id]);
+    if (!r.winner) return null;
+    const winnerName = r.winner === 'p1' ? m.p1 : m.p2;
+    if (winnerName === aName) return 'a';
+    if (winnerName === bName) return 'b';
+    return null;
+  }
+
+  const bySetDiff = (x: StandingRow, y: StandingRow) => {
     const dx = x.setsWon - x.setsLost;
     const dy = y.setsWon - y.setsLost;
     if (dy !== dx) return dy - dx;
     return y.setsWon - x.setsWon;
-  });
+  };
+
+  const active = rows.filter((r) => !r.withdrawn);
+  const withdrawnRows = rows.filter((r) => r.withdrawn);
+  active.sort((x, y) => y.points - x.points);
+
+  const result: StandingRow[] = [];
+  let i = 0;
+  while (i < active.length) {
+    let j = i;
+    while (j < active.length && active[j].points === active[i].points) j++;
+    const group = active.slice(i, j);
+    if (group.length === 2) {
+      const [x, y] = group;
+      const h2h = headToHead(x.name, y.name);
+      if (h2h === 'a') result.push(x, y);
+      else if (h2h === 'b') result.push(y, x);
+      else result.push(...group.sort(bySetDiff));
+    } else {
+      result.push(...group.sort(bySetDiff));
+    }
+    i = j;
+  }
+
+  return [...result, ...withdrawnRows];
 }
 
 export function groupComplete(matches: SimpleMatch[], sets: SetsMap, withdrawn: string[] = []): boolean {
