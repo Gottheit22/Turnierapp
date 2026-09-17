@@ -350,6 +350,34 @@ h2.section-title {
 .wo-btn:hover {
   background: rgba(255, 255, 255, 0.3);
 }
+.wo-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #ffd9c7;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.wo-tag-undo {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.wo-tag-undo:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
 .wo-banner {
   display: flex;
   align-items: center;
