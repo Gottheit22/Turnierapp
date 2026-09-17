@@ -987,7 +987,7 @@ function GroupPanel(props: {
             p2={m.p2}
             sets={sets[m.id]}
             onSetChange={onSetChange}
-            readOnly={readOnly}
+            readOnly={readOnly || withdrawn.includes(m.p1) || withdrawn.includes(m.p2)}
           />
         ))}
       </div>
